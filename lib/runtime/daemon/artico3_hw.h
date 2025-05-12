@@ -22,9 +22,11 @@ extern struct a3shuffler_t shuffler;
  */
 #define A3_MAXKERNS (0xF) // TODO: maybe make it configurable? Would also require additional VHDL parsing in Shuffler...
 
-#ifdef ZYNQMP
+#ifdef AU250
+#define A3_SLOTADDR (0x80000000)
+#elif ZYNQMP
 #define A3_SLOTADDR (0xb0000000)
-#else
+#else // ZYNQ
 #define A3_SLOTADDR (0x8aa00000)
 #endif
 

@@ -230,15 +230,15 @@ def _export_hw_kernel(prj, hwdir, link, kernel):
             #~ sys.exit(1)
         #~ # END DEBUG
 
-        log.info("Starting Vivado HLS ...")
+        log.info("Starting Vitis HLS ...")
 
         # NOTE: for some reason, using the subprocess module as in the
         #       original RDK does not work (does not recognize source and,
         #       therefore, Vivado is not started).
         subprocess.run("""
-            bash -c "source /opt/Xilinx/Vivado/{1}/settings64.sh &&
+            bash -c "source /tools/Xilinx/Vivado/{1}/settings64.sh &&
             cd {0} &&
-            vivado_hls -f csynth.tcl"
+            vitis_hls -f csynth.tcl"
             """.format(tmp.name, prj.impl.xil[1]), shell=True, check=True)
 
         src = shutil2.join(tmp.name, "a3_kernel", "sol", "syn", "vhdl")
@@ -289,7 +289,7 @@ def _export_hw(prj, hwdir, link):
         #       original RDK does not work (does not recognize source and,
         #       therefore, Vivado is not started).
         subprocess.run("""
-            bash -c "source /opt/Xilinx/Vivado/{1}/settings64.sh &&
+            bash -c "source /tools/Xilinx/Vivado/{1}/settings64.sh &&
             cd {0} &&
             vivado -mode batch -notrace -nojournal -nolog -source create_ip_library.tcl"
             """.format(hwdir, prj.impl.xil[1]), shell=True, check=True)
@@ -305,7 +305,7 @@ def _export_hw(prj, hwdir, link):
         #       original RDK does not work (does not recognize source and,
         #       therefore, Vivado is not started).
         subprocess.run("""
-            bash -c "source /opt/Xilinx/Vivado/{1}/settings64.sh &&
+            bash -c "source /tools/Xilinx/Vivado/{1}/settings64.sh &&
             cd {0} &&
             vivado -mode batch -notrace -nojournal -nolog -source export.tcl -tclargs -proj_name myARTICo3 -proj_path ."
             """.format(hwdir, prj.impl.xil[1]), shell=True, check=True)

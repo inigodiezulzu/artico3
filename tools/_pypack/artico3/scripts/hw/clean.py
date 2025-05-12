@@ -63,7 +63,7 @@ def _clean(args):
         #       original RDK does not work (does not recognize source and,
         #       therefore, Vivado is not started).
         subprocess.run("""
-            bash -c "source /opt/Xilinx/Vivado/{0}/settings64.sh &&
+            bash -c "source /tools/Xilinx/Vivado/{0}/settings64.sh &&
             vivado -mode batch -notrace -nojournal -nolog -source clean.tcl"
             """.format(prj.impl.xil[1]), shell=True, check=True)
 

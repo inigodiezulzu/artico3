@@ -24,6 +24,7 @@ OBJS = artico3_rcfg.o artico3_hw.o artico3.o
 
 ZYNQ_OBJS = $(OBJS:%=aarch32/_build/%)
 ZYNQMP_OBJS = $(OBJS:%=aarch64/_build/%)
+AU250_OBJS = $(OBJS_AU250:%=x86/_build/%)
 
 MKDIRP = mkdir -p
 CPF = cp -f
@@ -42,6 +43,10 @@ zynqmp: $(ZYNQMP_OBJS)
 	$(MKDIRP) aarch64/include
 	$(CPF) artico3.h aarch64/include
 
+.PHONY: au250
+au250: $(AU250_OBJS)
+	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o x86/libartico3.so
+
 .PHONY: clean
 clean:
 	rm -rf aarch32 aarch64
@@ -53,3 +58,7 @@ aarch32/_build/%.o: %.c
 aarch64/_build/%.o: %.c
 	$(MKDIRP) $(@D)
 	$(CC) -DZYNQMP $(CFLAGS) -c $< -o $@
+
+x86/_build/%.o: %.c
+	$(MKDIRP) $(@D)
+	$(CC) -DAU250 $(CFLAGS) -c $< -o $@

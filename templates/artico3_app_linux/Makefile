@@ -16,6 +16,9 @@ CFLAGS_ARTICo3D = $(CFLAGS_IN)-Wall -Wextra -fpic -I <a3<REPO_REL>a3>/linux -I <
 <a3<if DEVICE=="zynqmp">a3>
 CFLAGS_ARTICo3D = $(CFLAGS_IN)-DZYNQMP -Wall -Wextra -fpic -I <a3<REPO_REL>a3>/linux -I <a3<REPO_REL>a3>/lib/runtime/common
 <a3<end if>a3>
+<a3<if DEVICE=="au250">a3>
+CFLAGS_ARTICo3D = $(CFLAGS_IN)-DAU250 -Wall -Wextra -fpic -I <a3<REPO_REL>a3>/linux -I <a3<REPO_REL>a3>/lib/runtime/common
+<a3<end if>a3>
 LDFLAGS_ARTICo3D = -Wl,-R,. -shared
 LDLIBS_ARTICo3D = -lm -lpthread -lrt
 
@@ -24,6 +27,9 @@ CFLAGS_ARTICo3 = $(CFLAGS_IN)-Wall -Wextra -fpic -I <a3<REPO_REL>a3>/lib/runtime
 <a3<end if>a3>
 <a3<if DEVICE=="zynqmp">a3>
 CFLAGS_ARTICo3 = $(CFLAGS_IN)-DZYNQMP -Wall -Wextra -fpic -I <a3<REPO_REL>a3>/lib/runtime/common
+<a3<end if>a3>
+<a3<if DEVICE=="au250">a3>
+CFLAGS_ARTICo3 = $(CFLAGS_IN)-DAU250 -Wall -Wextra -fpic -I <a3<REPO_REL>a3>/lib/runtime/common
 <a3<end if>a3>
 LDFLAGS_ARTICo3 = -Wl,-R,. -shared
 LDLIBS_ARTICo3 = -lm -lpthread -lrt

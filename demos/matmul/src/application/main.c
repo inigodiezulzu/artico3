@@ -51,7 +51,7 @@ int main(int argc, char *argv[]) {
     if (argc > 1) {
         naccs = atoi(argv[1]);
     }
-    naccs = ((naccs > 0) && (naccs <= 4)) ? naccs : 4;
+    naccs = ((naccs > 0) && (naccs <= 16)) ? naccs : 4;
     printf("Using %d ARTICo3 accelerator(s)\n", naccs);
 
     // Initialize ARTICo3 infrastructure

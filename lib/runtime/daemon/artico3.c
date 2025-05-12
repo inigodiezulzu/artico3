@@ -1,14 +1,14 @@
 /*
- * ARTICo3 daemon runtime
- *
- * Author      : Alfonso Rodriguez <alfonso.rodriguezm@upm.es>
- *               Juan Encinas <juan.encinas@upm.es>
- * Date        : May 2024
- * Description : This file contains the ARTICo3 daemon runtime, which enables
- *               user applications to get access to adaptive
- *               hardware acceleration.
- *
- */
+* ARTICo3 daemon runtime
+*
+* Author      : Alfonso Rodriguez <alfonso.rodriguezm@upm.es>
+*               Juan Encinas <juan.encinas@upm.es>
+* Date        : May 2024
+* Description : This file contains the ARTICo3 daemon runtime, which enables
+*               user applications to get access to adaptive
+*               hardware acceleration.
+*
+*/
 
 
 #include <stdio.h>
@@ -52,35 +52,38 @@ const char * __shm_directory(size_t * len) {
 
 
 /*
- * ARTICo3 global variables
- *
- * @artico3_hw          : user-space map of ARTICo3 hardware registers
- * @artico3_fd          : /dev/artico3 file descriptor (used to access kernels)
- *
- * @shuffler            : current ARTICo3 infrastructure configuration
- * @kernels             : current kernel list
- *
- * @threads             : array of delegate scheduling threads
- * @mutex               : synchronization primitive for accessing @running
- * @running             : number of hardware kernels currently running (write/run/read)
- *
- * @coordinator         : current ARTICo3 Daemon coordinator
- * @users               : current user list
- *
- * @add_user_mutex      : synchronization primitive for adding a new user
- * @kernel_create_mutex : synchronization primitive for creating a new kernel
- * @kernels_mutex       : synchronization primitive for accessing @kernels
- * @users_mutex         : synchronization primitive for accessing @users
- *
- * @termination_flag    : flag to signal artico3_handle_request() loop termination
- *
- * @artico3_functions   : array of ARTICo3 function pointers
- *
- * @kernels_pool        : thread pool to handle kernels executions
- * @requests_pool       : thread pool to handle incoming user requests
- *
- */
+* ARTICo3 global variables
+*
+* @artico3_hw          : user-space map of ARTICo3 hardware registers
+* @artico3_fd          : /dev/artico3 file descriptor (used to access kernels)
+*
+* @shuffler            : current ARTICo3 infrastructure configuration
+* @kernels             : current kernel list
+*
+* @threads             : array of delegate scheduling threads
+* @mutex               : synchronization primitive for accessing @running
+* @running             : number of hardware kernels currently running (write/run/read)
+*
+* @coordinator         : current ARTICo3 Daemon coordinator
+* @users               : current user list
+*
+* @add_user_mutex      : synchronization primitive for adding a new user
+* @kernel_create_mutex : synchronization primitive for creating a new kernel
+* @kernels_mutex       : synchronization primitive for accessing @kernels
+* @users_mutex         : synchronization primitive for accessing @users
+*
+* @termination_flag    : flag to signal artico3_handle_request() loop termination
+*
+* @artico3_functions   : array of ARTICo3 function pointers
+*
+* @kernels_pool        : thread pool to handle kernels executions
+* @requests_pool       : thread pool to handle incoming user requests
+*
+*/
 static int artico3_fd;
+#ifdef AU250
+uint32_t *artico3_map = NULL;
+#endif
 uint32_t *artico3_hw = NULL;
 
 struct a3shuffler_t shuffler = {
@@ -128,15 +131,153 @@ static a3func_t artico3_functions[] = {
 static struct a3pool_t *kernels_pool;
 static struct a3pool_t *requests_pool;
 
+#ifdef AU250 
+/**
+ * @file artico3.c
+ * @brief This file contains the definition of RW_MAX_SIZE constant.
+ *
+ * The RW_MAX_SIZE constant represents the maximum size for read/write operations.
+ * It is defined as 0x7ffff000.
+ */
+#define RW_MAX_SIZE	0x7ffff000
+
+/**
+ * @brief Reads data from a file descriptor into a buffer.
+ *
+ * This function reads data from the specified file descriptor and stores it in the provided buffer.
+ *
+ * @param fname The name of the file being read.
+ * @param fd The file descriptor to read from.
+ * @param buffer The buffer to store the read data.
+ * @param size The size of the buffer.
+ * @param base The base offset for reading the file.
+ *
+ * @return The number of bytes read, or -1 if an error occurred.
+ */
+ssize_t read_to_buffer(char *fname, int fd, char *buffer, uint64_t size,
+            uint64_t base)
+{
+    ssize_t rc;
+    uint64_t count = 0;
+    char *buf = buffer;
+    off_t offset = base;
+    int loop = 0;
+
+    while (count < size) {
+        ssize_t bytes = size - count;
+
+        if (bytes > RW_MAX_SIZE)
+            bytes = RW_MAX_SIZE;
+
+        if (offset) {
+            rc = lseek(fd, offset, SEEK_SET);
+            if (rc != offset) {
+                fprintf(stderr, "%s, seek off 0x%lx != 0x%lx.\n",
+                    fname, rc, offset);
+                perror("seek file");
+                return -EIO;
+            }
+        }
+
+        /* read data from file into memory buffer */
+        rc = read(fd, buf, bytes);
+        if (rc < 0) {
+            fprintf(stderr, "%s, read 0x%lx @ 0x%lx failed %ld.\n",
+                fname, bytes, offset, rc);
+            perror("read file");
+            return -EIO;
+        }
+
+        count += rc;
+        if (rc != bytes) {
+            fprintf(stderr, "%s, read underflow 0x%lx/0x%lx @ 0x%lx.\n",
+                fname, rc, bytes, offset);
+            break;
+        }
+
+        buf += bytes;
+        offset += bytes;
+        loop++;
+    }
+
+    if (count != size && loop)
+        fprintf(stderr, "%s, read underflow 0x%lx/0x%lx.\n",
+            fname, count, size);
+    return count;
+}
+
+/**
+ * Writes data from a buffer to a file descriptor.
+ *
+ * @param fname The name of the file to write to.
+ * @param fd The file descriptor to write to.
+ * @param buffer The buffer containing the data to write.
+ * @param size The size of the data to write.
+ * @param base The base offset of the data in the buffer.
+ * @return The number of bytes written, or -1 on error.
+ */
+ssize_t write_from_buffer(char *fname, int fd, char *buffer, uint64_t size,
+            uint64_t base)
+{
+    ssize_t rc;
+    uint64_t count = 0;
+    char *buf = buffer;
+    off_t offset = base;
+    int loop = 0;
+
+    while (count < size) {
+        ssize_t bytes = size - count;
+
+        if (bytes > RW_MAX_SIZE)
+            bytes = RW_MAX_SIZE;
+
+        if (offset) {
+            rc = lseek(fd, offset, SEEK_SET);
+            if (rc != offset) {
+                fprintf(stderr, "%s, seek off 0x%lx != 0x%lx.\n",
+                    fname, rc, offset);
+                perror("seek file");
+                return -EIO;
+            }
+        }
+
+        /* write data to file from memory buffer */
+        rc = write(fd, buf, bytes);
+        if (rc < 0) {
+            fprintf(stderr, "%s, write 0x%lx @ 0x%lx failed %ld.\n",
+                fname, bytes, offset, rc);
+            perror("write file");
+            return -EIO;
+        }
+
+        count += rc;
+        if (rc != bytes) {
+            fprintf(stderr, "%s, write underflow 0x%lx/0x%lx @ 0x%lx.\n",
+                fname, rc, bytes, offset);
+            break;
+        }
+        buf += bytes;
+        offset += bytes;
+
+        loop++;
+    }	
+
+    if (count != size && loop)
+        fprintf(stderr, "%s, write underflow 0x%lx/0x%lx.\n",
+            fname, count, size);
+
+    return count;
+}
+#endif
 
 /*
- * ARTICo3 signal handler for SIGTERM and SIGINT
- *
- * This function sets a termination flag when SIGTERM and SIGINT is received, signaling the daemon
- * to stop and perform a clean shutdown.
- *
- * @signum : signal number (SIGTERM, SIGINT)
- */
+* ARTICo3 signal handler for SIGTERM and SIGINT
+*
+* This function sets a termination flag when SIGTERM and SIGINT is received, signaling the daemon
+* to stop and perform a clean shutdown.
+*
+* @signum : signal number (SIGTERM, SIGINT)
+*/
 void artico3_handle_sigterm(int signum) {
 
     // Set stop termination flag when signal is received
@@ -150,37 +291,45 @@ void artico3_handle_sigterm(int signum) {
 }
 
 /*
- * ARTICo3 init function
- *
- * This function sets up the basic software entities required to manage
- * the ARTICo3 low-level functionality (DMA transfers, kernel and slot
- * distributions, etc.).
- *
- * It also loads the FPGA with the initial bitstream (static system).
- *
- * Return : 0 on success, error code otherwise
- */
+* ARTICo3 init function
+*
+* This function sets up the basic software entities required to manage
+* the ARTICo3 low-level functionality (DMA transfers, kernel and slot
+* distributions, etc.).
+*
+* It also loads the FPGA with the initial bitstream (static system).
+*
+* Return : 0 on success, error code otherwise
+*/
 int artico3_init() {
-    const char *filename = "/dev/artico3";
+#ifdef AU250
+    const char *filename = "/dev/xdma0_user";
+#else
+const char *filename = "/dev/artico3";
+#endif
     unsigned int i;
     int ret, shm_fd;
     struct sigaction action;
 
     /*
-     * NOTE: this function relies on predefined addresses for both control
-     *       and data interfaces of the ARTICo3 infrastructure.
-     *       If the processor memory map is changed somehow, this has to
-     *       be reflected in this file.
-     *
-     *       Zynq-7000 Devices
-     *       ARTICo3 Control -> 0x7aa00000
-     *       ARTICo3 Data    -> 0x8aa00000
-     *
-     *       Zynq UltraScale+ MPSoC Devices
-     *       ARTICo3 Control -> 0xa0000000
-     *       ARTICo3 Data    -> 0xb0000000
-     *
-     */
+    * NOTE: this function relies on predefined addresses for both control
+    *       and data interfaces of the ARTICo3 infrastructure.
+    *       If the processor memory map is changed somehow, this has to
+    *       be reflected in this file.
+    *
+    *       Zynq-7000 Devices
+    *       ARTICo3 Control -> 0x7aa00000
+    *       ARTICo3 Data    -> 0x8aa00000
+    *
+    *       Zynq UltraScale+ MPSoC Devices
+    *       ARTICo3 Control -> 0xa0000000
+    *       ARTICo3 Data    -> 0xb0000000
+    * 	
+    *       Alveo U250 Devices
+    *       ARTICo3 Control -> 0x00400000
+    *       ARTICo3 Data    -> 0x80000000
+    *
+    */
 
     // Set up the signal handler to terminate the daemon SIGTERM
     action.sa_handler = artico3_handle_sigterm;
@@ -190,9 +339,11 @@ int artico3_init() {
     if (sigaction(SIGTERM, &action, NULL) == -1 || sigaction(SIGINT, &action, NULL) == -1) {
         a3_print_error("[artico3-hw] SIGTERM/SIGINT handler error\n");
     }
-
+    
+    #ifndef AU250
     // Load static system (global FPGA reconfiguration)
     fpga_load("system.bin", 0);
+    #endif
 
     // Open ARTICo3 device file
     artico3_fd = open(filename, O_RDWR);
@@ -203,13 +354,52 @@ int artico3_init() {
     a3_print_debug("[artico3-hw] artico3_fd=%d | dev=%s\n", artico3_fd, filename);
 
     // Obtain access to physical memory map using mmap()
+    #ifdef AU250
+    artico3_map = mmap(NULL, 0x3000, PROT_READ | PROT_WRITE, MAP_SHARED, artico3_fd, 0);
+
+    if (artico3_map == MAP_FAILED) {
+        a3_print_error("[artico3-hw] mmap() failed\n");
+        ret = -ENOMEM;
+        goto err_mmap;
+    }
+    a3_print_debug("[artico3-hw] artico3_map=%p\n", artico3_map);
+    #endif
+
+    #ifdef AU250
+    artico3_hw = mmap(NULL, 0x2000000, PROT_READ | PROT_WRITE, MAP_SHARED, artico3_fd, 0x2000000);
+    #else
     artico3_hw = mmap(NULL, 0x100000, PROT_READ | PROT_WRITE, MAP_SHARED, artico3_fd, 0);
+    #endif
     if (artico3_hw == MAP_FAILED) {
         a3_print_error("[artico3-hw] mmap() failed\n");
         ret = -ENOMEM;
         goto err_mmap;
     }
     a3_print_debug("[artico3-hw] artico3_hw=%p\n", artico3_hw);
+
+    #ifdef AU250
+    // Load static system (global FPGA reconfiguration)
+    uint32_t* DFX_reg_ctrl = artico3_map;
+    uint32_t* DFX_reg_data = (artico3_map + 1024);
+    uint32_t* DFX_reg_intr = (artico3_map + 2048);
+    a3_print_info("[artico3-hw_dfx] DFX_reg_ctrl=%d\n", DFX_reg_ctrl[0]);
+    a3_print_info("[artico3-hw_dfx] DFX_reg_data=%d\n", DFX_reg_data[0]);
+    a3_print_info("[artico3-hw_dfx] DFX_reg_intr=%d\n", DFX_reg_intr[0]);
+    DFX_reg_ctrl[0]=0x1;
+    DFX_reg_data[0]=0x1;
+    DFX_reg_intr[0]=0x1;
+    a3_print_info("[artico3-hw_dfx] DFX_reg_ctrl=%d\n", DFX_reg_ctrl[0]);
+    a3_print_info("[artico3-hw_dfx] DFX_reg_data=%d\n", DFX_reg_data[0]);
+    a3_print_info("[artico3-hw_dfx] DFX_reg_intr=%d\n", DFX_reg_intr[0]);
+    // Load ARTICo3 static system (global FPGA reconfiguration)
+    system("sudo xvsecctl -b 0x01 -F 0x0 -c 0x1 -p ../build.hw/bin/top_A1_W1_X1_recombined_partial.bin");
+    DFX_reg_ctrl[0]=0;
+    DFX_reg_data[0]=0;
+    DFX_reg_intr[0]=0;
+    a3_print_info("[artico3-hw_dfx] DFX_reg_ctrl=%d\n", DFX_reg_ctrl[0]);
+    a3_print_info("[artico3-hw_dfx] DFX_reg_data=%d\n", DFX_reg_data[0]);
+    a3_print_info("[artico3-hw_dfx] DFX_reg_intr=%d\n", DFX_reg_intr[0]);
+    #endif
 
     // Get maximum number of ARTICo3 slots in the platform
     shuffler.nslots = artico3_hw_get_nslots();
@@ -320,22 +510,22 @@ int artico3_init() {
     coordinator->request.channel_id = 0;
     coordinator->request.func = 0;
 
-	// Initialize kernels thread pool
+    // Initialize kernels thread pool
     kernels_pool = artico3_pool_init(A3_MAXKERNS, 0);
-	if (!kernels_pool) {
-		a3_print_error("[artico3-hw] kernels thread pool failed\n");
+    if (!kernels_pool) {
+        a3_print_error("[artico3-hw] kernels thread pool failed\n");
         ret = -ENODEV;
         goto err_kernels_pool;
-	}
+    }
     a3_print_debug("[artico3-hw] kernels thread pool=%p\n", kernels_pool);
 
-	// Initialize the requests thread pool
+    // Initialize the requests thread pool
     requests_pool = artico3_pool_init(A3_MAXKERNS, 1);
-	if(!requests_pool) {
-		a3_print_error("[artico3-hw] request thread pool failed\n");
+    if(!requests_pool) {
+        a3_print_error("[artico3-hw] request thread pool failed\n");
         ret = -ENODEV;
         goto err_requests_pool;
-	}
+    }
     a3_print_debug("[artico3-hw] request thread pool=%p\n", requests_pool);
 
     return 0;
@@ -360,8 +550,13 @@ err_malloc_kernels:
     free(shuffler.slots);
 
 err_malloc_slots:
+    #ifdef AU250
+    munmap(artico3_map, 0x3000);
+    munmap(artico3_hw, 0x2000000);
+    #else
     munmap(artico3_hw, 0x100000);
-
+    #endif
+    
 err_mmap:
     close(artico3_fd);
 
@@ -370,11 +565,11 @@ err_mmap:
 
 
 /*
- * ARTICo3 exit function
- *
- * This function cleans the software entities created by artico3_init().
- *
- */
+* ARTICo3 exit function
+*
+* This function cleans the software entities created by artico3_init().
+*
+*/
 void artico3_exit() {
 
     // Destroy thread pool
@@ -409,7 +604,8 @@ void artico3_exit() {
     free(shuffler.slots);
 
     // Release memory obtained with mmap()
-    munmap(artico3_hw, 0x100000);
+    munmap(artico3_hw, 0x2000000);
+    munmap(artico3_map, 0x3000);
 
     // Close ARTICo3 device file
     close(artico3_fd);
@@ -427,17 +623,17 @@ void artico3_exit() {
 
 
 /*
- * ARTICo3 add new user
- *
- * This function creates the software entities required to manage a new user.
- *
- * @args             : buffer storing the function arguments sent by the user
- *     @shm_filename : user shared memory object filename
- *
- * TODO: create folders and subfolders on /dev/shm for each user and its data (kernels, inputs, etc.)
- *
- * Return : A3_MAXKERNS on success, error code otherwise
- */
+* ARTICo3 add new user
+*
+* This function creates the software entities required to manage a new user.
+*
+* @args             : buffer storing the function arguments sent by the user
+*     @shm_filename : user shared memory object filename
+*
+* TODO: create folders and subfolders on /dev/shm for each user and its data (kernels, inputs, etc.)
+*
+* Return : A3_MAXKERNS on success, error code otherwise
+*/
 int artico3_add_user(void *args) {
     unsigned int index;
     int shm_fd;
@@ -511,15 +707,15 @@ int artico3_add_user(void *args) {
 
 
 /*
- * ARTICo3 remove existing user
- *
- * This function cleans the software entities created by artico3_add_user().
- *
- * @args           : buffer storing the function arguments sent by the user
- *     @user_id    : ID of the user to be removed
- *     @channel_id : ID of the channel used for handling daemon/user communication
- *
- */
+* ARTICo3 remove existing user
+*
+* This function cleans the software entities created by artico3_add_user().
+*
+* @args           : buffer storing the function arguments sent by the user
+*     @user_id    : ID of the user to be removed
+*     @channel_id : ID of the channel used for handling daemon/user communication
+*
+*/
 int artico3_remove_user(void *args) {
     unsigned int index;
     struct a3channel_t *channel = NULL;
@@ -576,11 +772,11 @@ int artico3_remove_user(void *args) {
 
 
 /*
- * ARTICo3 delegate handling request thread
- *
- * @args : request data
- *
- */
+* ARTICo3 delegate handling request thread
+*
+* @args : request data
+*
+*/
 void *_artico3_handle_request(void *args) {
     struct a3channel_t *channel = NULL;
     void *func_args = NULL;
@@ -646,13 +842,13 @@ void *_artico3_handle_request(void *args) {
 
 
 /*
- * ARTICo3 wait user hardware-acceleration request
- *
- * This function waits a command request from user.
- *
- * Return : 0 on success, error code otherwise
- *
- */
+* ARTICo3 wait user hardware-acceleration request
+*
+* This function waits a command request from user.
+*
+* Return : 0 on success, error code otherwise
+*
+*/
 int artico3_handle_request() {
     int ret;
 
@@ -699,19 +895,19 @@ int artico3_handle_request() {
 
 
 /*
- * ARTICo3 create hardware kernel
- *
- * This function creates an ARTICo3 kernel in the current application.
- *
- * @args         : buffer storing the function arguments sent by the user
- *     @name     : name of the hardware kernel to be created
- *     @membytes : local memory size (in bytes) of the associated accelerator
- *     @membanks : number of local memory banks in the associated accelerator
- *     @regs     : number of read/write registers in the associated accelerator
- *
- * Return : 0 on success, error code otherwise
- *
- */
+* ARTICo3 create hardware kernel
+*
+* This function creates an ARTICo3 kernel in the current application.
+*
+* @args         : buffer storing the function arguments sent by the user
+*     @name     : name of the hardware kernel to be created
+*     @membytes : local memory size (in bytes) of the associated accelerator
+*     @membanks : number of local memory banks in the associated accelerator
+*     @regs     : number of read/write registers in the associated accelerator
+*
+* Return : 0 on success, error code otherwise
+*
+*/
 int artico3_kernel_create(void *args) {
     unsigned int index, i;
     struct a3kernel_t *kernel = NULL;
@@ -838,16 +1034,16 @@ err_malloc_kernel_name:
 
 
 /*
- * ARTICo3 release hardware kernel
- *
- * This function deletes an ARTICo3 kernel in the current application.
- *
- * @args     : buffer storing the function arguments sent by the user
- *     @name : name of the hardware kernel to be deleted
- *
- * Return : 0 on success, error code otherwise
- *
- */
+* ARTICo3 release hardware kernel
+*
+* This function deletes an ARTICo3 kernel in the current application.
+*
+* @args     : buffer storing the function arguments sent by the user
+*     @name : name of the hardware kernel to be deleted
+*
+* Return : 0 on success, error code otherwise
+*
+*/
 int artico3_kernel_release(void *args) {
     unsigned int index, slot;
     struct a3kernel_t *kernel = NULL;
@@ -906,19 +1102,19 @@ int artico3_kernel_release(void *args) {
 
 
 /*
- * ARTICo3 start hardware kernel
- *
- * This function starts all hardware accelerators of a given kernel.
- *
- * NOTE: only the runtime can call this function, using it from user
- *       applications is forbidden (and not possible due to the static
- *       specifier).
- *
- * @name : hardware kernel to start
- *
- * Return : 0 on success, error code otherwise
- *
- */
+* ARTICo3 start hardware kernel
+*
+* This function starts all hardware accelerators of a given kernel.
+*
+* NOTE: only the runtime can call this function, using it from user
+*       applications is forbidden (and not possible due to the static
+*       specifier).
+*
+* @name : hardware kernel to start
+*
+* Return : 0 on success, error code otherwise
+*
+*/
 static int _artico3_kernel_start(const char *name) {
     unsigned int index;
     uint8_t id;
@@ -956,16 +1152,16 @@ static int _artico3_kernel_start(const char *name) {
 
 
 /*
- * ARTICo3 data transfer to accelerators
- *
- * @id      : current kernel ID
- * @naccs   : current number of hardware accelerators for this kernel
- * @round   : current round (global over local work ratio index)
- * @nrounds : total number of rounds (global over local work ratio)
- *
- * Return : 0 on success, error code otherwise
- *
- */
+* ARTICo3 data transfer to accelerators
+*
+* @id      : current kernel ID
+* @naccs   : current number of hardware accelerators for this kernel
+* @round   : current round (global over local work ratio index)
+* @nrounds : total number of rounds (global over local work ratio)
+*
+* Return : 0 on success, error code otherwise
+*
+*/
 int artico3_send(uint8_t id, int naccs, unsigned int round, unsigned int nrounds) {
     int acc;
     unsigned int port, nports, nconsts, ninputs, ninouts;
@@ -976,9 +1172,17 @@ int artico3_send(uint8_t id, int naccs, unsigned int round, unsigned int nrounds
     uint32_t blksize;
     uint8_t loaded;
 
+    #ifdef AU250
+    char *allocated = NULL;
+    int fpga_fd;
+    char *device = NULL;
+    #endif
+
+    #ifndef AU250
     struct pollfd pfd;
     pfd.fd = artico3_fd;
     pfd.events = POLLDMA;
+    #endif
 
     // Check if constant memory ports need to be loaded
     loaded = kernels[id - 1]->c_loaded;
@@ -998,6 +1202,20 @@ int artico3_send(uint8_t id, int naccs, unsigned int round, unsigned int nrounds
         return -ENODEV;
     }
 
+    #ifdef AU250
+    //DMA transfer parameters
+    device = "/dev/xdma0_h2c_0";
+
+    fpga_fd = open(device, O_RDWR);
+
+    if (fpga_fd < 0) {
+                fprintf(stderr, "unable to open device %s, %d.\n",
+                        device, fpga_fd);
+        perror("open device");
+                return -1;
+    }
+    #endif
+
     // If all inputs are constant memories, and they have been already loaded...
     if (nports == 0) {
         // ... set up fake data transfer...
@@ -1006,8 +1224,14 @@ int artico3_send(uint8_t id, int naccs, unsigned int round, unsigned int nrounds
         token.memoff = 0x00000000;
         token.hwaddr = (void *)A3_SLOTADDR;
         token.hwoff = (id << 16);
-        token.size = 0;
+        token.size = 0;  
+
+        #ifdef AU250
+        a3_print_debug("dev %s, addr 0x%p,size 0x%lx, offset 0x%lx\n",device, token.hwaddr , token.size, (uint64_t)(token.hwaddr+token.hwoff ));
+        write_from_buffer(device, fpga_fd, (char *)token.memaddr, (uint64_t)token.size, (uint64_t)(token.hwaddr+token.hwoff ));
+        #else
         ioctl(artico3_fd, ARTICo3_IOC_DMA_MEM2HW, &token);
+        #endif
         // ...launch kernel execution using software command...
         _artico3_kernel_start(kernels[id - 1]->name);
         // ...and return
@@ -1016,13 +1240,30 @@ int artico3_send(uint8_t id, int naccs, unsigned int round, unsigned int nrounds
 
     // Compute block size (32-bit words per accelerator)
     blksize = nports * ((kernels[id - 1]->membytes / kernels[id - 1]->membanks) / (sizeof (a3data_t)));
+    #ifdef AU250
+    token.size = naccs * blksize * sizeof *mem;
+    token.memoff = 0x00000000;
+    #endif
 
     // Allocate DMA physical memory
+    #ifdef AU250
+    posix_memalign((void **)&allocated, 4096 /*alignment */ , token.size + 4096);
+    if (!allocated) {
+        fprintf(stderr, "OOM %lu.\n", token.size + 4096);
+        a3_print_error("[artico3-hw] memalign() failed\n");
+        return -ENOMEM;
+        printf("Error allocation\n");
+    }
+    mem = (a3data_t *)allocated + token.memoff;
+
+    a3_print_debug("host buffer 0x%lx = %p\n", token.size + 4096, mem); 
+    #else
     mem = mmap(NULL, naccs * blksize * sizeof *mem, PROT_READ | PROT_WRITE, MAP_SHARED, artico3_fd, sysconf(_SC_PAGESIZE));
     if (mem == MAP_FAILED) {
         a3_print_error("[artico3-hw] mmap() failed\n");
         return -ENOMEM;
     }
+    #endif
 
     // Copy inputs to physical memory (TODO: could it be possible to avoid this step?)
     for (acc = 0; acc < naccs; acc++) {
@@ -1101,13 +1342,25 @@ int artico3_send(uint8_t id, int naccs, unsigned int round, unsigned int nrounds
     token.hwaddr = (void *)A3_SLOTADDR;
     token.hwoff = (id << 16) + (loaded ? (nconsts * (kernels[id - 1]->membytes / kernels[id - 1]->membanks)) : 0);
     token.size = naccs * blksize * sizeof *mem;
+    #ifdef AU250
+    a3_print_debug("dev %s, addr 0x%lx,size 0x%lx, offset 0x%lx\n",device, token.hwaddr , token.size, (uint64_t)(token.hwaddr+token.hwoff ));
+    //Read data from buffer
+    write_from_buffer(device, fpga_fd, (char *)token.memaddr, (uint64_t)token.size, (uint64_t)(token.hwaddr+token.hwoff ));
+    #else
     ioctl(artico3_fd, ARTICo3_IOC_DMA_MEM2HW, &token);
+    #endif
 
     // Wait for DMA transfer to finish
+    #ifndef AU250
     poll(&pfd, 1, -1);
+    #endif
 
     // Release allocated DMA memory
+    #ifdef AU250
+    free(allocated);
+    #else
     munmap(mem, naccs * blksize * sizeof *mem);
+    #endif
 
     // Set constant memory flag to 1 -> next transfer must not load
     kernels[id - 1]->c_loaded = 1;
@@ -1115,33 +1368,58 @@ int artico3_send(uint8_t id, int naccs, unsigned int round, unsigned int nrounds
     // Print ARTICo3 registers
     artico3_hw_print_regs();
 
+    #ifdef AU250
+    close(fpga_fd);
+    #endif
+
     return 0;
 }
 
 
 /*
- * ARTICo3 data transfer from accelerators
- *
- * @id      : current kernel ID
- * @naccs   : current number of hardware accelerators for this kernel
- * @round   : current round (global over local work ratio index)
- * @nrounds : total number of rounds (global over local work ratio)
- *
- * Return : 0 on success, error code otherwise
- *
- */
+* ARTICo3 data transfer from accelerators
+*
+* @id      : current kernel ID
+* @naccs   : current number of hardware accelerators for this kernel
+* @round   : current round (global over local work ratio index)
+* @nrounds : total number of rounds (global over local work ratio)
+*
+* Return : 0 on success, error code otherwise
+*
+*/
 int artico3_recv(uint8_t id, int naccs, unsigned int round, unsigned int nrounds) {
     int acc;
     unsigned int port, nports, noutputs, ninouts;
 
     struct dmaproxy_token token;
     a3data_t *mem = NULL;
+    #ifdef AU250
+    char *allocated = NULL;
+    int fpga_fd;
+    char *device = NULL;
+    #endif
 
     uint32_t blksize;
 
+    #ifndef AU250
     struct pollfd pfd;
     pfd.fd = artico3_fd;
     pfd.events = POLLDMA;
+    #endif
+
+    #ifdef AU250
+    //DMA transfer parameters
+    device = "/dev/xdma0_c2h_0";
+
+    fpga_fd = open(device, O_RDWR);
+
+    if (fpga_fd < 0) {
+                fprintf(stderr, "unable to open device %s, %d.\n",
+                        device, fpga_fd);
+        perror("open device");
+                return -1;
+    }
+    #endif
 
     // Get number of output ports
     ninouts = 0;
@@ -1162,11 +1440,22 @@ int artico3_recv(uint8_t id, int naccs, unsigned int round, unsigned int nrounds
     blksize = nports * ((kernels[id - 1]->membytes / kernels[id - 1]->membanks) / (sizeof (a3data_t)));
 
     // Allocate DMA physical memory
+    #ifdef AU250
+    token.size = naccs * blksize * sizeof *mem;
+    token.memoff = 0x00000000;
+    posix_memalign((void **)&allocated, 4096 /*alignment */ , token.size + 4096);
+    if (!allocated) {
+        fprintf(stderr, "OOM %lu.\n", token.size + 4096);
+        return -ENOMEM;
+    }
+    mem = (a3data_t *)allocated + token.memoff;
+    #else
     mem = mmap(NULL, naccs * blksize * sizeof *mem, PROT_READ | PROT_WRITE, MAP_SHARED, artico3_fd, sysconf(_SC_PAGESIZE));
     if (mem == MAP_FAILED) {
         a3_print_error("[artico3-hw] mmap() failed\n");
         return -ENOMEM;
     }
+    #endif
 
     // Set up data transfer
     artico3_hw_setup_transfer(blksize);
@@ -1176,11 +1465,21 @@ int artico3_recv(uint8_t id, int naccs, unsigned int round, unsigned int nrounds
     token.memoff = 0x00000000;
     token.hwaddr = (void *)A3_SLOTADDR;
     token.hwoff = (id << 16) + (kernels[id - 1]->membytes - (blksize * sizeof (a3data_t)));
+    #ifdef AU250
+    a3_print_debug("host buffer 0x%lx = %p\n", token.size + 4096, token.memaddr); 
+    // Start DMA transfer
+    a3_print_debug("dev %s, addr 0x%lx,size 0x%lx, offset 0x%lx\n",device, token.hwaddr , token.size, (uint64_t)(token.hwaddr+token.hwoff ));
+    //Read data from buffer
+    read_to_buffer(device, fpga_fd, (char *)token.memaddr, (uint64_t)token.size, (uint64_t)(token.hwaddr+token.hwoff));
+    #else
     token.size = naccs * blksize * sizeof *mem;
     ioctl(artico3_fd, ARTICo3_IOC_DMA_HW2MEM, &token);
+    #endif
 
     // Wait for DMA transfer to finish
-    poll(&pfd, 1, -1);
+    #ifndef AU250
+     poll(&pfd, 1, -1);
+    #endif
 
     // Copy outputs from physical memory (TODO: could it be possible to avoid this step?)
     for (acc = 0; acc < naccs; acc++) {
@@ -1222,7 +1521,12 @@ int artico3_recv(uint8_t id, int naccs, unsigned int round, unsigned int nrounds
     }
 
     // Release allocated DMA memory
+    #ifdef AU250
+    free(allocated);
+    close(fpga_fd);
+    #else
     munmap(mem, naccs * blksize * sizeof *mem);
+    #endif
 
     // Print ARTICo3 registers
     artico3_hw_print_regs();
@@ -1232,9 +1536,9 @@ int artico3_recv(uint8_t id, int naccs, unsigned int round, unsigned int nrounds
 
 
 /*
- * ARTICo3 delegate scheduling thread
- *
- */
+* ARTICo3 delegate scheduling thread
+*
+*/
 void *_artico3_kernel_execute(void *data) {
     unsigned int round, nrounds;
     int naccs;
@@ -1316,18 +1620,18 @@ void *_artico3_kernel_execute(void *data) {
 
 
 /*
- * ARTICo3 execute hardware kernel
- *
- * This function executes an ARTICo3 kernel in the current application.
- *
- * @args      : buffer storing the function arguments sent by the user
- *     @name  : name of the hardware kernel to execute
- *     @gsize : global work size (total amount of work to be done)
- *     @lsize : local work size (work that can be done by one accelerator)
- *
- * Return : 0 on success, error code otherwisw
- *
- */
+* ARTICo3 execute hardware kernel
+*
+* This function executes an ARTICo3 kernel in the current application.
+*
+* @args      : buffer storing the function arguments sent by the user
+*     @name  : name of the hardware kernel to execute
+*     @gsize : global work size (total amount of work to be done)
+*     @lsize : local work size (work that can be done by one accelerator)
+*
+* Return : 0 on success, error code otherwisw
+*
+*/
 int artico3_kernel_execute(void *args) {
     unsigned int index, nrounds;
     int ret;
@@ -1405,16 +1709,16 @@ int artico3_kernel_execute(void *args) {
 
 
 /*
- * ARTICo3 wait for kernel completion
- *
- * This function waits until the kernel has finished.
- *
- * @args     : buffer storing the function arguments sent by the user
- *     @name : hardware kernel to wait for
- *
- * Return : 0 on success, error code otherwise
- *
- */
+* ARTICo3 wait for kernel completion
+*
+* This function waits until the kernel has finished.
+*
+* @args     : buffer storing the function arguments sent by the user
+*     @name : hardware kernel to wait for
+*
+* Return : 0 on success, error code otherwise
+*
+*/
 int artico3_kernel_wait(void *args) {
     unsigned int index;
 
@@ -1454,16 +1758,16 @@ int artico3_kernel_wait(void *args) {
 
 
 /*
- * ARTICo3 reset hardware kernel
- *
- * This function resets all hardware accelerators of a given kernel.
- *
- * @args     : buffer storing the function arguments sent by the user
- *     @name : hardware kernel to reset
- *
- * Return : 0 on success, error code otherwise
- *
- */
+* ARTICo3 reset hardware kernel
+*
+* This function resets all hardware accelerators of a given kernel.
+*
+* @args     : buffer storing the function arguments sent by the user
+*     @name : hardware kernel to reset
+*
+* Return : 0 on success, error code otherwise
+*
+*/
 int artico3_kernel_reset(void *args) {
     unsigned int index;
     uint8_t id;
@@ -1508,29 +1812,29 @@ int artico3_kernel_reset(void *args) {
 
 
 /*
- * ARTICo3 configuration register write
- *
- * This function writes configuration data to ARTICo3 kernel registers.
- *
- * @args       : buffer storing the function arguments sent by the user
- *     @name   : hardware kernel to be addressed
- *     @offset : memory offset of the register to be accessed
- *     @cfg    : array of configuration words to be written, one per
- *               equivalent accelerator
- *
- * Return : 0 on success, error code otherwise
- *
- * NOTE : configuration registers need to be handled taking into account
- *        execution priorities.
- *
- *        TMR == (0x1-0xf) > DMR == (0x1-0xf) > Simplex (TMR == 0 && DMR == 0)
- *
- *        The way in which the hardware infrastructure has been implemented
- *        sequences first TMR transactions (in ascending group order), then
- *        DMR transactions (in ascending group order) and finally, Simplex
- *        transactions.
- *
- */
+* ARTICo3 configuration register write
+*
+* This function writes configuration data to ARTICo3 kernel registers.
+*
+* @args       : buffer storing the function arguments sent by the user
+*     @name   : hardware kernel to be addressed
+*     @offset : memory offset of the register to be accessed
+*     @cfg    : array of configuration words to be written, one per
+*               equivalent accelerator
+*
+* Return : 0 on success, error code otherwise
+*
+* NOTE : configuration registers need to be handled taking into account
+*        execution priorities.
+*
+*        TMR == (0x1-0xf) > DMR == (0x1-0xf) > Simplex (TMR == 0 && DMR == 0)
+*
+*        The way in which the hardware infrastructure has been implemented
+*        sequences first TMR transactions (in ascending group order), then
+*        DMR transactions (in ascending group order) and finally, Simplex
+*        transactions.
+*
+*/
 int artico3_kernel_wcfg(void *args) {
     unsigned int index, i, j;
     struct a3shuffler_t shuffler_shadow;
@@ -1656,29 +1960,29 @@ int artico3_kernel_wcfg(void *args) {
 
 
 /*
- * ARTICo3 configuration register read
- *
- * This function reads configuration data from ARTICo3 kernel registers.
- *
- * @args       : buffer storing the function arguments sent by the user
- *     @name   : hardware kernel to be addressed
- *     @offset : memory offset of the register to be accessed
- *     @cfg    : array of configuration words to be read, one per
- *               equivalent accelerator
- *
- * Return : 0 on success, error code otherwise
- *
- * NOTE : configuration registers need to be handled taking into account
- *        execution priorities.
- *
- *        TMR == (0x1-0xf) > DMR == (0x1-0xf) > Simplex (TMR == 0 && DMR == 0)
- *
- *        The way in which the hardware infrastructure has been implemented
- *        sequences first TMR transactions (in ascending group order), then
- *        DMR transactions (in ascending group order) and finally, Simplex
- *        transactions.
- *
- */
+* ARTICo3 configuration register read
+*
+* This function reads configuration data from ARTICo3 kernel registers.
+*
+* @args       : buffer storing the function arguments sent by the user
+*     @name   : hardware kernel to be addressed
+*     @offset : memory offset of the register to be accessed
+*     @cfg    : array of configuration words to be read, one per
+*               equivalent accelerator
+*
+* Return : 0 on success, error code otherwise
+*
+* NOTE : configuration registers need to be handled taking into account
+*        execution priorities.
+*
+*        TMR == (0x1-0xf) > DMR == (0x1-0xf) > Simplex (TMR == 0 && DMR == 0)
+*
+*        The way in which the hardware infrastructure has been implemented
+*        sequences first TMR transactions (in ascending group order), then
+*        DMR transactions (in ascending group order) and finally, Simplex
+*        transactions.
+*
+*/
 int artico3_kernel_rcfg(void *args) {
     unsigned int index, i, j;
     struct a3shuffler_t shuffler_shadow;
@@ -1804,27 +2108,27 @@ int artico3_kernel_rcfg(void *args) {
 
 
 /*
- * ARTICo3 allocate buffer memory
- *
- * This function allocates dynamic memory to be used as a buffer between
- * the application and the local memories in the hardware kernels.
- *
- * @args      : buffer storing the function arguments sent by the user
- *     @size  : amount of memory (in bytes) to be allocated for the buffer
- *     @kname : hardware kernel name to associate this buffer with
- *     @pname : port name to associate this buffer with
- *     @dir   : data direction of the port
- *
- * Return : pointer to allocated memory on success, NULL otherwise
- *
- * NOTE   : the dynamically allocated buffer is mapped via mmap() to a
- *          POSIX shared memory object in the "/dev/shm" tmpfs to make it
- *          accessible from different processes
- *
- * TODO   : implement optimized version using qsort();
- * TODO   : create folders and subfolders on /dev/shm for each user and its data (kernels, inputs, etc.)
- *
- */
+* ARTICo3 allocate buffer memory
+*
+* This function allocates dynamic memory to be used as a buffer between
+* the application and the local memories in the hardware kernels.
+*
+* @args      : buffer storing the function arguments sent by the user
+*     @size  : amount of memory (in bytes) to be allocated for the buffer
+*     @kname : hardware kernel name to associate this buffer with
+*     @pname : port name to associate this buffer with
+*     @dir   : data direction of the port
+*
+* Return : pointer to allocated memory on success, NULL otherwise
+*
+* NOTE   : the dynamically allocated buffer is mapped via mmap() to a
+*          POSIX shared memory object in the "/dev/shm" tmpfs to make it
+*          accessible from different processes
+*
+* TODO   : implement optimized version using qsort();
+* TODO   : create folders and subfolders on /dev/shm for each user and its data (kernels, inputs, etc.)
+*
+*/
 int artico3_alloc(void *args) {
     int fd;
     unsigned int index, p, i, j;
@@ -2076,18 +2380,18 @@ err_malloc_port_name:
 
 
 /*
- * ARTICo3 release buffer memory
- *
- * This function frees dynamic memory allocated as a buffer between the
- * application and the hardware kernel.
- *
- * @args      : buffer storing the function arguments sent by the user
- *     @kname : hardware kernel name this buffer is associanted with
- *     @pname : port name this buffer is associated with
- *
- * Return : 0 on success, error code otherwise
- *
- */
+* ARTICo3 release buffer memory
+*
+* This function frees dynamic memory allocated as a buffer between the
+* application and the hardware kernel.
+*
+* @args      : buffer storing the function arguments sent by the user
+*     @kname : hardware kernel name this buffer is associanted with
+*     @pname : port name this buffer is associated with
+*
+* Return : 0 on success, error code otherwise
+*
+*/
 int artico3_free(void *args) {
     unsigned int index, p;
     struct a3port_t *port = NULL;
@@ -2169,21 +2473,21 @@ int artico3_free(void *args) {
 
 
 /*
- * ARTICo3 load accelerator / change accelerator configuration
- *
- * This function loads a hardware accelerator and/or sets its specific
- * configuration.
- *
- * @args      : buffer storing the function arguments sent by the user
- *     @name  : hardware kernel name
- *     @slot  : reconfigurable slot in which the accelerator is to be loaded
- *     @tmr   : TMR group ID (0x1-0xf)
- *     @dmr   : DMR group ID (0x1-0xf)
- *     @force : force reconfiguration even if the accelerator is already present
- *
- * Return : 0 on success, error code otherwise
- *
- */
+* ARTICo3 load accelerator / change accelerator configuration
+*
+* This function loads a hardware accelerator and/or sets its specific
+* configuration.
+*
+* @args      : buffer storing the function arguments sent by the user
+*     @name  : hardware kernel name
+*     @slot  : reconfigurable slot in which the accelerator is to be loaded
+*     @tmr   : TMR group ID (0x1-0xf)
+*     @dmr   : DMR group ID (0x1-0xf)
+*     @force : force reconfiguration even if the accelerator is already present
+*
+* Return : 0 on success, error code otherwise
+*
+*/
 int artico3_load(void *args) {
     unsigned int index;
     char filename[128];
@@ -2270,8 +2574,13 @@ int artico3_load(void *args) {
                 shuffler.slots[slot].state = S_LOAD;
 
                 // Load partial bitstream
+                #ifdef AU250
+                sprintf(filename, "sudo xvsecctl -b 0x01 -F 0x0 -c 0x1 -p ../build.hw/bin/pbs/a3_%s_a3_slot_%d_partial.bin", name, slot);            
+                ret = system(filename);
+                #else
                 sprintf(filename, "pbs/a3_%s_a3_slot_%d_partial.bin", name, slot);
                 ret = fpga_load(filename, 1);
+                #endif
                 if (ret) {
                     goto err_fpga;
                 }
@@ -2318,16 +2627,16 @@ err_fpga:
 
 
 /*
- * ARTICo3 remove accelerator
- *
- * This function removes a hardware accelerator from a reconfigurable slot.
- *
- * @args      : buffer storing the function arguments sent by the user
- *     @slot  : reconfigurable slot from which the accelerator is to be removed
- *
- * Return : 0 on success, error code otherwise
- *
- */
+* ARTICo3 remove accelerator
+*
+* This function removes a hardware accelerator from a reconfigurable slot.
+*
+* @args      : buffer storing the function arguments sent by the user
+*     @slot  : reconfigurable slot from which the accelerator is to be removed
+*
+* Return : 0 on success, error code otherwise
+*
+*/
 int artico3_unload(void *args) {
 
     // Get function arguments
@@ -2374,17 +2683,17 @@ int artico3_unload(void *args) {
 
 
 /*
- * ARTICo3 get number of accelerators
- *
- * This function gets the current number of available hardware accelerators
- * for a given kernel ID tag.
- *
- * @args      : buffer storing the function arguments sent by the user
- *     @name  : name of the hardware kernel to get the naccs from
- *
- * Return : number of accelerators on success, error code otherwise
- *
- */
+* ARTICo3 get number of accelerators
+*
+* This function gets the current number of available hardware accelerators
+* for a given kernel ID tag.
+*
+* @args      : buffer storing the function arguments sent by the user
+*     @name  : name of the hardware kernel to get the naccs from
+*
+* Return : number of accelerators on success, error code otherwise
+*
+*/
 int artico3_get_naccs(void *args) {
     unsigned int index;
 

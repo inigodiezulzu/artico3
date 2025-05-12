@@ -17,8 +17,9 @@ set_directive_interface -mode ap_ovld -name reg_<a3<rid>a3> "<a3<NAME>a3>" <a3<r
 
 # I/O memories
 <a3<generate for PORTS>a3>
-set_directive_interface -mode bram -name bram_<a3<pid>a3> "<a3<NAME>a3>" <a3<pname>a3>
-set_directive_resource -core RAM_1P_BRAM "<a3<NAME>a3>" <a3<pname>a3>
+set_directive_interface -mode bram -name bram_<a3<pid>a3> -storage_type ram_1p "<a3<NAME>a3>" <a3<pname>a3>
+# set_directive_interface -mode bram -name bram_<a3<pid>a3> "<a3<NAME>a3>" <a3<pname>a3>
+# set_directive_resource -core RAM_1P_BRAM "<a3<NAME>a3>" <a3<pname>a3>
 <a3<end generate>a3>
 # Data counter
 set_directive_interface -mode ap_none "<a3<NAME>a3>" values

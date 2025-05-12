@@ -14,6 +14,7 @@ add_files [ glob *.cpp *.c *.h]
 open_solution sol
 set_part {<a3<PART>a3>}
 create_clock -period 10 -name default
+config_compile -pipeline_loops 0
 #~ config_rtl -reset all -reset_level low
 config_rtl -reset_level low
 source directives.tcl
