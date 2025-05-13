@@ -392,7 +392,7 @@ const char *filename = "/dev/artico3";
     a3_print_info("[artico3-hw_dfx] DFX_reg_data=%d\n", DFX_reg_data[0]);
     a3_print_info("[artico3-hw_dfx] DFX_reg_intr=%d\n", DFX_reg_intr[0]);
     // Load ARTICo3 static system (global FPGA reconfiguration)
-    system("sudo xvsecctl -b 0x01 -F 0x0 -c 0x1 -p ../build.hw/bin/top_A1_W1_X1_recombined_partial.bin");
+    system("sudo xvsecctl -b 0x01 -F 0x0 -c 0x1 -p ../build.hw/bin/top_A1_artico3_recombined_partial.bin");
     DFX_reg_ctrl[0]=0;
     DFX_reg_data[0]=0;
     DFX_reg_intr[0]=0;
