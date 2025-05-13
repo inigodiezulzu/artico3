@@ -46,10 +46,13 @@ zynqmp: $(ZYNQMP_OBJS)
 .PHONY: au250
 au250: $(AU250_OBJS)
 	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o x86/libartico3.so
+	$(AR) rcs x86/libartico3.a $^
+	$(MKDIRP) x86/include
+	$(CPF) artico3.h x86/include
 
 .PHONY: clean
 clean:
-	rm -rf aarch32 aarch64
+	rm -rf aarch32 aarch64 x86
 
 aarch32/_build/%.o: %.c
 	$(MKDIRP) $(@D)

@@ -64,7 +64,6 @@ proc artico3_hw_setup {new_project_path new_project_name artico3_ip_dir} {
     # Otherwise current project will be reused.
     if { [llength $new_project_name] > 0} {
         create_project -force $new_project_name $new_project_path -part xcu250-figd2104-2L-e
-        set_property board_part xilinx.com:au250:part0:1.3 [current_project]
     }
 
     # Save directory and project names to variables for easy reuse
@@ -138,118 +137,108 @@ proc artico3_hw_setup {new_project_path new_project_name artico3_ip_dir} {
 
     # set the current impl run
     current_run -implementation [get_runs impl_1]
+
+	# Adding sources referenced in BDs, if not already added
+	if { [get_files a3_slot.vhd] == "" } {
+	import_files -quiet -fileset sources_1 pcores/artico3_slot/a3_slot.vhd
+	}
+
     #
     # Start block design
     #
 
     create_bd_design "system"
     update_compile_order -fileset sources_1
-	# Set 'sim_1' fileset properties
-	
 	
     # Add artico3 repository
     set_property  ip_repo_paths $artico3_ip_dir [current_project]
     update_ip_catalog
     
-	
-    # Create interface ports
-	set pci_express_x16 [ create_bd_intf_port -mode Master -vlnv xilinx.com:interface:pcie_7x_mgt_rtl:1.0 pci_express_x16 ]
+	# Set board template
+    set_property board_part xilinx.com:au250:part0:1.3 [current_project]
 
-	set pcie_refclk [ create_bd_intf_port -mode Slave -vlnv xilinx.com:interface:diff_clock_rtl:1.0 pcie_refclk ]
+	# Create interface ports
+	set S00_AXI_0 [ create_bd_intf_port -mode Slave -vlnv xilinx.com:interface:aximm_rtl:1.0 S00_AXI_0 ]
 	set_property -dict [ list \
-	CONFIG.FREQ_HZ {100000000} \
-	] $pcie_refclk
+	CONFIG.ADDR_WIDTH {32} \
+	CONFIG.ARUSER_WIDTH {0} \
+	CONFIG.AWUSER_WIDTH {0} \
+	CONFIG.BUSER_WIDTH {0} \
+	CONFIG.DATA_WIDTH {32} \
+	CONFIG.HAS_BRESP {1} \
+	CONFIG.HAS_BURST {0} \
+	CONFIG.HAS_CACHE {0} \
+	CONFIG.HAS_LOCK {0} \
+	CONFIG.HAS_PROT {1} \
+	CONFIG.HAS_QOS {0} \
+	CONFIG.HAS_REGION {0} \
+	CONFIG.HAS_RRESP {1} \
+	CONFIG.HAS_WSTRB {1} \
+	CONFIG.ID_WIDTH {0} \
+	CONFIG.NUM_READ_OUTSTANDING {1} \
+	CONFIG.NUM_READ_THREADS {1} \
+	CONFIG.NUM_WRITE_OUTSTANDING {1} \
+	CONFIG.NUM_WRITE_THREADS {1} \
+	CONFIG.PROTOCOL {AXI4LITE} \
+	CONFIG.READ_WRITE_MODE {READ_WRITE} \
+	CONFIG.RUSER_BITS_PER_BYTE {0} \
+	CONFIG.RUSER_WIDTH {0} \
+	CONFIG.WUSER_BITS_PER_BYTE {0} \
+	CONFIG.WUSER_WIDTH {0} \
+	] $S00_AXI_0
+
+	set S00_AXI_1 [ create_bd_intf_port -mode Slave -vlnv xilinx.com:interface:aximm_rtl:1.0 S00_AXI_1 ]
+	set_property -dict [ list \
+	CONFIG.ADDR_WIDTH {32} \
+	CONFIG.ARUSER_WIDTH {1} \
+	CONFIG.AWUSER_WIDTH {1} \
+	CONFIG.BUSER_WIDTH {1} \
+	CONFIG.DATA_WIDTH {32} \
+	CONFIG.HAS_BRESP {1} \
+	CONFIG.HAS_BURST {1} \
+	CONFIG.HAS_CACHE {1} \
+	CONFIG.HAS_LOCK {1} \
+	CONFIG.HAS_PROT {1} \
+	CONFIG.HAS_QOS {1} \
+	CONFIG.HAS_REGION {0} \
+	CONFIG.HAS_RRESP {1} \
+	CONFIG.HAS_WSTRB {1} \
+	CONFIG.ID_WIDTH {12} \
+	CONFIG.MAX_BURST_LENGTH {256} \
+	CONFIG.NUM_READ_OUTSTANDING {2} \
+	CONFIG.NUM_READ_THREADS {1} \
+	CONFIG.NUM_WRITE_OUTSTANDING {2} \
+	CONFIG.NUM_WRITE_THREADS {1} \
+	CONFIG.PROTOCOL {AXI4} \
+	CONFIG.READ_WRITE_MODE {READ_WRITE} \
+	CONFIG.RUSER_BITS_PER_BYTE {0} \
+	CONFIG.RUSER_WIDTH {0} \
+	CONFIG.SUPPORTS_NARROW_BURST {1} \
+	CONFIG.WUSER_BITS_PER_BYTE {0} \
+	CONFIG.WUSER_WIDTH {0} \
+	] $S00_AXI_1
+
+	set M00_AXI_0 [ create_bd_intf_port -mode Master -vlnv xilinx.com:interface:aximm_rtl:1.0 M00_AXI_0 ]
+	set_property -dict [ list \
+	CONFIG.ADDR_WIDTH {32} \
+	CONFIG.DATA_WIDTH {32} \
+	CONFIG.PROTOCOL {AXI4} \
+	] $M00_AXI_0
+
 
 	# Create ports
-	set pcie_perstn [ create_bd_port -dir I -type rst pcie_perstn ]
+	set s_axi_aclk [ create_bd_port -dir I -type clk s_axi_aclk -freq_hz 100000000]
 	set_property -dict [ list \
-	CONFIG.POLARITY {ACTIVE_LOW} \
-	] $pcie_perstn
-	
-	set user_lnk_up_0 [ create_bd_port -dir O user_lnk_up_0 ]
-	
-	# Create instance: xdma_0, and set properties
-	set xdma_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:xdma:4.1 xdma_0 ]
-	set_property -dict [list \
-	CONFIG.PCIE_BOARD_INTERFACE {pci_express_x16} \
-	CONFIG.SYS_RST_N_BOARD_INTERFACE {pcie_perstn} \
-	CONFIG.axilite_master_en {true} \
-	CONFIG.axilite_master_size {8} \
-	CONFIG.mcap_enablement {Tandem_PCIe_with_Field_Updates} \
-	CONFIG.pciebar2axibar_axil_master {0x40000000} \
-	CONFIG.pf0_base_class_menu {Simple_communication_controllers} \
-	CONFIG.pf0_device_id {9011} \
-	CONFIG.ref_clk_freq {100_MHz} \
-	CONFIG.xdma_axi_intf_mm {AXI_Memory_Mapped} \
-	CONFIG.xdma_num_usr_irq {1} \
-	CONFIG.xdma_rnum_chnl {4} \
-	CONFIG.xdma_wnum_chnl {4} \
-	] $xdma_0
-
-	# Create instance: util_ds_buf, and set properties
-	set util_ds_buf [ create_bd_cell -type ip -vlnv xilinx.com:ip:util_ds_buf:2.2 util_ds_buf ]
-	set_property -dict [list \
-	CONFIG.DIFF_CLK_IN_BOARD_INTERFACE {pcie_refclk} \
-	CONFIG.USE_BOARD_FLOW {true} \
-	] $util_ds_buf
-
-	# Create instance: clk_wiz_0, and set properties
-	set clk_wiz_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:clk_wiz:6.0 clk_wiz_0 ]
-	set_property -dict [list \
-	CONFIG.OPTIMIZE_CLOCKING_STRUCTURE_EN {true} \
-	CONFIG.RESET_BOARD_INTERFACE {Custom} \
-	CONFIG.RESET_PORT {resetn} \
-	CONFIG.RESET_TYPE {ACTIVE_LOW} \
-	CONFIG.USE_BOARD_FLOW {true} \
-	CONFIG.USE_LOCKED {false} \
-	] $clk_wiz_0
+	CONFIG.ASSOCIATED_BUSIF {S00_AXI_0:S00_AXI_1:M00_AXI_0} \
+	CONFIG.ASSOCIATED_RESET {s_axi_aresetn} \
+	] $s_axi_aclk
+	set s_axi_aresetn [ create_bd_port -dir I -type rst s_axi_aresetn ]
+	set interrupt [ create_bd_port -dir O -from 3 -to 0 -type intr interrupt ]
 
 
-	# Create instance: rst_clk_wiz_0_100M, and set properties
-	set rst_clk_wiz_0_100M [ create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 rst_clk_wiz_0_100M ]
-	
-	# Create instance: axi_gpio_0, and set properties
-	set axi_gpio_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_gpio:2.0 axi_gpio_0 ]
-	set_property -dict [list \
-	CONFIG.C_ALL_INPUTS_2 {1} \
-	CONFIG.C_ALL_OUTPUTS {1} \
-	CONFIG.C_GPIO2_WIDTH {7} \
-	CONFIG.C_GPIO_WIDTH {1} \
-	CONFIG.C_IS_DUAL {1} \
-	] $axi_gpio_0
+	# Create instance: axi_traffic_gen_0, and set properties
+	set axi_traffic_gen_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_traffic_gen:3.0 axi_traffic_gen_0 ]
 
-
-	# Create instance: dfx_axi_shutdown_man_0, and set properties
-	set dfx_axi_shutdown_man_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:dfx_axi_shutdown_manager:1.0 dfx_axi_shutdown_man_0 ]
-	set_property CONFIG.RP_IS_MASTER {false} $dfx_axi_shutdown_man_0
-
-	  # Create instance: xlconcat_0, and set properties
-	set xlconcat_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:xlconcat:2.1 xlconcat_0 ]
-	set_property CONFIG.NUM_PORTS {1} $xlconcat_0
-	
-	# Create instance: xlconcat_1, and set properties
-	set xlconcat_1 [ create_bd_cell -type ip -vlnv xilinx.com:ip:xlconcat:2.1 xlconcat_1 ]
-	set_property CONFIG.NUM_PORTS {7} $xlconcat_1
-
-
-	# Create instance: dfx_decoupler_0, and set properties
-	set dfx_decoupler_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:dfx_decoupler:1.0 dfx_decoupler_0 ]
-	set_property -dict [list \
-	CONFIG.ALL_PARAMS {INTF {intf_1 {ID 0 VLNV xilinx.com:signal:interrupt_rtl:1.0 SIGNALS {INTERRUPT {PRESENT 1 WIDTH 1}}}} HAS_AXI_LITE 0 ALWAYS_HAVE_AXI_CLK 1 IPI_PROP_COUNT 0} \
-	CONFIG.GUI_INTERFACE_NAME {intf_1} \
-	CONFIG.GUI_SELECT_INTERFACE {0} \
-	CONFIG.GUI_SELECT_MODE {master} \
-	CONFIG.GUI_SELECT_VLNV {xilinx.com:signal:interrupt_rtl:1.0} \
-	] $dfx_decoupler_0
-
-
-	# Create instance: dfx_axi_shutdown_man_1, and set properties
-	set dfx_axi_shutdown_man_1 [ create_bd_cell -type ip -vlnv xilinx.com:ip:dfx_axi_shutdown_manager:1.0 dfx_axi_shutdown_man_1 ]
-	set_property -dict [list \
-	CONFIG.DP_PROTOCOL {AXI4LITE} \
-	CONFIG.RP_IS_MASTER {false} \
-	] $dfx_axi_shutdown_man_1
-	
 	
 # APPLICATION CONFIGURATION
 
@@ -258,110 +247,86 @@ proc artico3_hw_setup {new_project_path new_project_name artico3_ip_dir} {
 
     # Create instances of hardware kernels
 <a3<generate for SLOTS>a3>
-    create_bd_cell -type ip -vlnv cei.upm.es:artico3:<a3<SlotCoreName>a3>:[string range <a3<SlotCoreVersion>a3> 0 2] "a3_slot_<a3<id>a3>"
+	set block_name a3_slot
+	set block_cell_name a3_slot_<a3<id>a3>
+	if { [catch {set a3_slot_<a3<id>a3> [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
+		catch {common::send_gid_msg -ssname BD::TCL -id 2095 -severity "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+		return 1
+	} elseif { $a3_slot_<a3<id>a3> eq "" } {
+		catch {common::send_gid_msg -ssname BD::TCL -id 2096 -severity "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+		return 1
+	}
 <a3<end generate>a3>
 
     # Required to avoid problems with AXI Interconnect
     set_property CONFIG.C_S_AXI_ID_WIDTH {12} $artico3_shuffler_0
 
-    # Create and configure new AXI Interconnects
-	set axi_a3ctrl [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_interconnect:2.1 axi_a3ctrl ]
+    # Create and configure new AXI SmartConnect instances
+	set axi_a3ctrl [ create_bd_cell -type ip -vlnv xilinx.com:ip:smartconnect:1.0 axi_a3ctrl ]
 	set_property -dict [list \
-	CONFIG.NUM_MI {2} \
-	CONFIG.NUM_SI {1} \
+		CONFIG.NUM_MI {2} \
+		CONFIG.NUM_SI {1} \
 	] $axi_a3ctrl
 
 	set axi_a3data [ create_bd_cell -type ip -vlnv xilinx.com:ip:smartconnect:1.0 axi_a3data ]
 	set_property -dict [list \
-	CONFIG.NUM_CLKS {2} \
-	CONFIG.NUM_MI {1} \
-	CONFIG.NUM_SI {1} \
+		CONFIG.NUM_CLKS {1} \
+		CONFIG.NUM_MI {1} \
+		CONFIG.NUM_SI {1} \
 	] $axi_a3data
-	
+
+	set axi_mdata [ create_bd_cell -type ip -vlnv xilinx.com:ip:smartconnect:1.0 axi_mdata ]
+	set_property -dict [list \
+		CONFIG.NUM_MI {1} \
+		CONFIG.NUM_SI {1} \
+	] $axi_mdata
+
 	# Connect AXI interfaces
-
-	# Create DFX_decoupler interface connections
-	connect_bd_intf_net -intf_net axi_a3data_M00_AXI [get_bd_intf_pins axi_a3data/M00_AXI] [get_bd_intf_pins dfx_axi_shutdown_man_0/S_AXI]
-	connect_bd_intf_net -intf_net axi_a3ctrl_M00_AXI [get_bd_intf_pins axi_a3ctrl/M00_AXI] [get_bd_intf_pins dfx_axi_shutdown_man_1/S_AXI]
-	connect_bd_intf_net -intf_net axi_a3ctrl_M01_AXI [get_bd_intf_pins axi_a3ctrl/M01_AXI] [get_bd_intf_pins axi_gpio_0/S_AXI]
-	connect_bd_intf_net -intf_net DFX_decoupler_M_AXI1 [get_bd_intf_pins artico3_shuffler_0/s00_axi] [get_bd_intf_pins dfx_axi_shutdown_man_1/M_AXI]
-	connect_bd_intf_net -intf_net dfx_axi_shutdown_man_0_M_AXI [get_bd_intf_pins dfx_axi_shutdown_man_0/M_AXI] [get_bd_intf_pins artico3_shuffler_0/s01_axi]
-
-	# XDMA
-	connect_bd_intf_net -intf_net xdma_0_M_AXI [get_bd_intf_pins xdma_0/M_AXI] [get_bd_intf_pins axi_a3data/S00_AXI]
-	connect_bd_intf_net -intf_net xdma_0_M_AXI_LITE [get_bd_intf_pins xdma_0/M_AXI_LITE] [get_bd_intf_pins axi_a3ctrl/S00_AXI]
-
-	connect_bd_intf_net -intf_net xdma_0_pcie_mgt [get_bd_intf_ports pci_express_x16] [get_bd_intf_pins xdma_0/pcie_mgt]
-	connect_bd_intf_net -intf_net pcie_refclk_1 [get_bd_intf_ports pcie_refclk] [get_bd_intf_pins util_ds_buf/CLK_IN_D]
+	connect_bd_intf_net -intf_net S00_AXI_0_1 [get_bd_intf_ports S00_AXI_0] [get_bd_intf_pins axi_a3ctrl/S00_AXI]
+	connect_bd_intf_net -intf_net axi_a3ctrl_M00_AXI [get_bd_intf_pins axi_a3ctrl/M00_AXI] [get_bd_intf_pins artico3_shuffler_0/s00_axi]
+	connect_bd_intf_net -intf_net axi_a3ctrl_M01_AXI [get_bd_intf_pins axi_a3ctrl/M01_AXI] [get_bd_intf_pins axi_traffic_gen_0/S_AXI]
+  	
+	connect_bd_intf_net -intf_net S00_AXI_1_1 [get_bd_intf_ports S00_AXI_1] [get_bd_intf_pins axi_a3data/S00_AXI]
+	connect_bd_intf_net -intf_net axi_a3data_M00_AXI [get_bd_intf_pins artico3_shuffler_0/s01_axi] [get_bd_intf_pins axi_a3data/M00_AXI]
 	
+	connect_bd_intf_net -intf_net axi_traffic_gen_0_M_AXI [get_bd_intf_pins axi_traffic_gen_0/M_AXI] [get_bd_intf_pins axi_mdata/S00_AXI]
+	connect_bd_intf_net -intf_net smartconnect_0_M00_AXI [get_bd_intf_ports M00_AXI_0] [get_bd_intf_pins axi_mdata/M00_AXI]
 
     # Connect clocks
-	connect_bd_net -net xdma_0_axi_aclk [get_bd_pins xdma_0/axi_aclk] [get_bd_pins axi_a3ctrl/S00_ACLK] [get_bd_pins clk_wiz_0/clk_in1] [get_bd_pins axi_a3data/aclk1]
-								   
-	connect_bd_net -net clk_wiz_0_clk_out1 [get_bd_pins clk_wiz_0/clk_out1] \
-						[get_bd_pins axi_a3data/aclk] \
-						[get_bd_pins rst_clk_wiz_0_100M/slowest_sync_clk] \
-						[get_bd_pins axi_a3ctrl/M00_ACLK] \
-						[get_bd_pins axi_a3ctrl/M01_ACLK] \
-						[get_bd_pins axi_a3ctrl/ACLK] \
+	connect_bd_net -net clk_wiz_0_clk_out1  [get_bd_ports s_axi_aclk] \
 						[get_bd_pins artico3_shuffler_0/s_axi_aclk] \
-						[get_bd_pins dfx_axi_shutdown_man_0/clk] \
-						[get_bd_pins axi_gpio_0/s_axi_aclk] \
-						[get_bd_pins dfx_axi_shutdown_man_1/clk]
-										   
-	connect_bd_net -net util_ds_buf_IBUF_DS_ODIV2 [get_bd_pins util_ds_buf/IBUF_DS_ODIV2] [get_bd_pins xdma_0/sys_clk]
-	
-	connect_bd_net -net util_ds_buf_IBUF_OUT [get_bd_pins util_ds_buf/IBUF_OUT] [get_bd_pins xdma_0/sys_clk_gt]
-	
+						[get_bd_pins axi_a3ctrl/aclk] \
+						[get_bd_pins axi_a3data/aclk] \
+						[get_bd_pins axi_mdata/aclk] \
+						[get_bd_pins axi_traffic_gen_0/s_axi_aclk]
+		
     # Connect resets
-	
-	connect_bd_net -net pcie_perstn_1 [get_bd_ports pcie_perstn] [get_bd_pins xdma_0/sys_rst_n]
-	
-	connect_bd_net [get_bd_pins rst_clk_wiz_0_100M/peripheral_aresetn] \
-						[get_bd_pins axi_a3data/aresetn] \
-						[get_bd_pins axi_a3ctrl/M00_ARESETN] \
-						[get_bd_pins axi_a3ctrl/M01_ARESETN] \
-						[get_bd_pins axi_a3ctrl/ARESETN] \
+	connect_bd_net -net s_axi_aresetn_2  [get_bd_ports s_axi_aresetn] \
 						[get_bd_pins artico3_shuffler_0/s_axi_aresetn] \
-						[get_bd_pins dfx_axi_shutdown_man_0/resetn] \
-						[get_bd_pins axi_gpio_0/s_axi_aresetn] \
-						[get_bd_pins dfx_axi_shutdown_man_1/resetn]
-						
-	connect_bd_net -net xdma_0_axi_aresetn [get_bd_pins xdma_0/axi_aresetn] \
-					   [get_bd_pins axi_a3ctrl/S00_ARESETN]  \
-					   [get_bd_pins clk_wiz_0/resetn] \
-					   [get_bd_pins rst_clk_wiz_0_100M/ext_reset_in]
-	
-	# Connect GPIOs
-	
-	connect_bd_net -net xdma_0_user_lnk_up [get_bd_pins xdma_0/user_lnk_up] [get_bd_ports user_lnk_up_0]
-	connect_bd_net -net dfx_axi_shutdown_man_0_in_shutdown [get_bd_pins dfx_axi_shutdown_man_0/in_shutdown] [get_bd_pins xlconcat_1/In1]
-	connect_bd_net -net dfx_axi_shutdown_man_0_rd_in_shutdown [get_bd_pins dfx_axi_shutdown_man_0/rd_in_shutdown] [get_bd_pins xlconcat_1/In3]
-	connect_bd_net -net dfx_axi_shutdown_man_0_wr_in_shutdown [get_bd_pins dfx_axi_shutdown_man_0/wr_in_shutdown] [get_bd_pins xlconcat_1/In2]
-	connect_bd_net -net dfx_axi_shutdown_man_1_in_shutdown [get_bd_pins dfx_axi_shutdown_man_1/in_shutdown] [get_bd_pins xlconcat_1/In4]
-	connect_bd_net -net dfx_axi_shutdown_man_1_rd_in_shutdown [get_bd_pins dfx_axi_shutdown_man_1/rd_in_shutdown] [get_bd_pins xlconcat_1/In6]
-	connect_bd_net -net dfx_axi_shutdown_man_1_wr_in_shutdown [get_bd_pins dfx_axi_shutdown_man_1/wr_in_shutdown] [get_bd_pins xlconcat_1/In5]
-	connect_bd_net -net dfx_decoupler_0_decouple_status [get_bd_pins dfx_decoupler_0/decouple_status] [get_bd_pins xlconcat_1/In0]
-	connect_bd_net -net xlconcat_1_dout [get_bd_pins xlconcat_1/dout] [get_bd_pins axi_gpio_0/gpio2_io_i]
-   	connect_bd_net -net axi_gpio_0_gpio_io_o [get_bd_pins axi_gpio_0/gpio_io_o] [get_bd_pins dfx_axi_shutdown_man_0/request_shutdown] [get_bd_pins dfx_decoupler_0/decouple] [get_bd_pins dfx_axi_shutdown_man_1/request_shutdown]
+						[get_bd_pins axi_a3ctrl/aresetn] \
+						[get_bd_pins axi_a3data/aresetn] \
+						[get_bd_pins axi_mdata/aresetn] \
+						[get_bd_pins axi_traffic_gen_0/s_axi_aresetn]
 
-    # Connect interrupts	
-    connect_bd_net -net artico3_shuffler_0_interrupt [get_bd_pins artico3_shuffler_0/interrupt] [get_bd_pins dfx_decoupler_0/rp_intf_1_INTERRUPT]
-    connect_bd_net -net xlconcat_0_dout [get_bd_pins xlconcat_0/dout] [get_bd_pins xdma_0/usr_irq_req]
-    connect_bd_net -net dfx_decoupler_0_s_intf_1_INTERRUPT [get_bd_pins dfx_decoupler_0/s_intf_1_INTERRUPT] [get_bd_pins xlconcat_0/In0]
+	# Connect interrupts
+	set xlconcat_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:xlconcat:2.1 xlconcat_0 ]
+	set_property CONFIG.NUM_PORTS {4} $xlconcat_0
+
+	connect_bd_net -net xlconcat_0_dout  [get_bd_pins xlconcat_0/dout] \
+  						[get_bd_ports interrupt]
+	connect_bd_net -net artico3_shuffler_0_interrupt  [get_bd_pins artico3_shuffler_0/interrupt] \
+  						[get_bd_pins xlconcat_0/In0]
 	
     # Connect ARTICo3 slots
 <a3<generate for SLOTS>a3>
-    connect_bd_intf_net -intf_net artico3_slot<a3<id>a3> [get_bd_intf_pins artico3_shuffler_0/m<a3<id>a3>_artico3] [get_bd_intf_pins a3_slot_<a3<id>a3>/s_artico3]
+    connect_bd_intf_net -intf_net artico3_slot<a3<id>a3> [get_bd_intf_pins artico3_shuffler_0/m<a3<id>a3>_artico3] [get_bd_intf_pins a3_slot_<a3<id>a3>/s]
 <a3<end generate>a3>
 
     # Generate memory-mapped segments for custom peripherals
-    assign_bd_address -offset 0x80000000 -range 0x00100000 -target_address_space [get_bd_addr_spaces xdma_0/M_AXI] [get_bd_addr_segs artico3_shuffler_0/s01_axi/reg0] -force
-    assign_bd_address -offset 0x40400000 -range 0x00400000 -target_address_space [get_bd_addr_spaces xdma_0/M_AXI_LITE] [get_bd_addr_segs artico3_shuffler_0/s00_axi/reg0] -force
-    assign_bd_address -offset 0x40002000 -range 0x00000400 -target_address_space [get_bd_addr_spaces xdma_0/M_AXI_LITE] [get_bd_addr_segs axi_gpio_0/S_AXI/Reg] -force
-    # Create DFX_decoupler group
-   	group_bd_cells DFX_decoupler [get_bd_cells dfx_axi_shutdown_man_1] [get_bd_cells axi_gpio_0] [get_bd_cells dfx_decoupler_0] [get_bd_cells dfx_axi_shutdown_man_0] [get_bd_cells xlconcat_1]
-
+	assign_bd_address -offset 0x00000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces axi_traffic_gen_0/Data] [get_bd_addr_segs M00_AXI_0/Reg] -force
+	assign_bd_address -offset 0x42000000 -range 0x00400000 -target_address_space [get_bd_addr_spaces S00_AXI_0] [get_bd_addr_segs artico3_shuffler_0/s00_axi/reg0] -force
+	assign_bd_address -offset 0x42400000 -range 0x00010000 -target_address_space [get_bd_addr_spaces S00_AXI_0] [get_bd_addr_segs axi_traffic_gen_0/S_AXI/Reg0] -force
+	assign_bd_address -offset 0x80000000 -range 0x00400000 -target_address_space [get_bd_addr_spaces S00_AXI_1] [get_bd_addr_segs artico3_shuffler_0/s01_axi/reg0] -force
 
 # END
 
@@ -407,13 +372,8 @@ proc artico3_hw_setup {new_project_path new_project_name artico3_ip_dir} {
 <a3<end generate>a3>
 # END
 
-# LOW-LEVEL DEPENDENCIES
-
-	# Add DPR constraints
-	# TODO: Document the usage of the hardcoded constraint file and suggest parameterization for compatibility with different hardware
-	add_files -fileset constrs_1 -norecurse $proj_dir/xcu250.xdc
-
-# END
+# Close Vivado project
+close_project
 
 }
 
