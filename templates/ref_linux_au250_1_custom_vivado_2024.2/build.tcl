@@ -39,15 +39,13 @@ proc get_cpu_core_count {} {
     }
 }
 
-proc artico3_build_bitstream {} {
+proc artico3_syntesize {} {
 
-    #~ open_project myARTICo3.xpr
-    #~ launch_runs impl_1 -to_step write_bitstream -jobs [ expr [get_cpu_core_count] / 2 + 1]
-    #~ wait_on_run impl_1
-    #~ close_project
 
     # Open Vivado project
     open_project myARTICo3.xpr
+    set dcp_file_name reconfig_artico3
+    set top system
 
     #
     # Main system synthesis
@@ -55,9 +53,20 @@ proc artico3_build_bitstream {} {
 
     puts "\[A3DK\] generating static system"
 
-    # Synthesize main system
-    launch_runs synth_1 -jobs [ expr [get_cpu_core_count] / 2 + 1]
-    wait_on_run synth_1
+    # Generate output products
+    generate_target all [get_files *system.bd]
+    # Export IP user files
+    export_ip_user_files -of_objects [get_files *system.bd] -no_script -sync -force -quiet
+    # Create specific IP run
+    create_ip_run [get_files -of_objects [get_fileset sources_1] *system.bd]
+    # Launch module run
+    launch_runs system_axi_traffic_gen_0_0_synth_1 system_axi_mdata_0_synth_1 system_axi_a3ctrl_0_synth_1 system_axi_a3data_0_synth_1 system_artico3_shuffler_0_0_synth_1 -jobs [ expr [get_cpu_core_count] / 2 + 1]
+    # Wait for module run to finish
+    wait_on_run system_artico3_shuffler_0_0_synth_1
+    # Synthesize reconfig system
+    synth_design -top $top -part xcu250-figd2104-2L-e -mode out_of_context
+    # Save checkpoint 
+    write_checkpoint -force checkpoints/${dcp_file_name}.dcp
 
 <a3<generate for KERNELS(KernCoreName!="a3_dummy")>a3>
     #
@@ -78,49 +87,40 @@ proc artico3_build_bitstream {} {
     # Wait for module run to finish
     wait_on_run <a3<KernCoreName>a3>_slot_0_synth_1
 <a3<end generate>a3>
-    #
-    # Main system implementation
-    #
 
-    puts "\[A3DK\] implementing static system"
-	
-    # Run implementation
-    
-    set_param hd.boundaryStaticLogicPlacementControlForAFamily 0
+}
 
-    launch_runs impl_1 -to_step route_design -jobs [ expr [get_cpu_core_count] / 2 + 1]
-    wait_on_run impl_1
+proc artico3_implementation {} {
 
-    # Open implemented design
-    open_run impl_1
+    set loc "./A1"
+    set part xcu250-figd2104-2L-e
 
-    # Save checkpoint
-    file mkdir [pwd]/checkpoints
-    write_checkpoint -force checkpoints/system.dcp
+    file delete -force $loc
+    file mkdir $loc
+    file mkdir $loc/reports
+    open_checkpoint checkpoints/top_A0_locked.dcp
+    puts "#HD: Subdividing reconfig_base_inst into second-order a3_slot RPs"
+    pr_subdivide -cell floorplan_static_i/reconfig_base_inst_0/U0 -subcells {floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_0
+                                                                            floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_1
+                                                                            floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_2
+                                                                            floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_3
+                                                                            floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_4
+                                                                            floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_5
+                                                                            floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_6
+                                                                            floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_7
+                                                                            floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_8
+                                                                            floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_9
+                                                                            floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_10
+                                                                            floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_11
+                                                                            floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_12
+                                                                            floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_13
+                                                                            floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_14
+                                                                            floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_15} ./checkpoints/reconfig_artico3.dcp
+    write_checkpoint -force $loc/top_A1_divided.dcp
+    puts "	#HD: Completed"
+    close_project
 
-    # Generate static system bitstream
-    file mkdir [pwd]/bitstreams
-    write_bitstream -force -bin_file -no_partial_bitfile bitstreams/system.bit
-    write_bitstream -force -bin_file -cell system_i/artico3_shuffler_0 bitstreams/artico3_shuffler_0.bit
-    file mkdir [pwd]/bin
-    file mkdir [pwd]/bin/pbs
-    write_cfgmem -force -format mcs -interface spix4 -size 128 -loadbit "up 0x01002000 bitstreams/system_tandem1.bit" bin/system_tandem1.mcs
-    file rename -force "bitstreams/system_tandem2.bin" "bin"
-    file rename -force "bitstreams/artico3_shuffler_0.bin" "bin"
 
-    # Replace slot contents by black boxes
-<a3<generate for SLOTS>a3>
-    update_design -cells [get_cells -hierarchical a3_slot_<a3<id>a3>] -black_box
-<a3<end generate>a3>
-
-	# Replace shuffler contents by black boxes
-	update_design -cells [get_cells -hierarchical artico3_shuffler_0] -black_box
-	
-    # Lock static routing
-    lock_design -level routing
-
-    # Save checkpoint
-    write_checkpoint -force checkpoints/static.dcp
 
 <a3<generate for KERNELS(KernCoreName!="a3_dummy")>a3>
     #
@@ -128,41 +128,121 @@ proc artico3_build_bitstream {} {
     #
 
     puts "\[A3DK\] implementing kernel <a3<KernCoreName>a3>"
-
-    # Open checkpoint
-    open_checkpoint checkpoints/static.dcp
-
-    # Replace black boxes by kernel logic
+    create_project -in_memory -part $part > $loc/create_project.log
+    add_file $loc/top_A1_divided.dcp
+    add_file myARTICo3.runs/<a3<KernCoreName>a3>_slot_0_synth_1/<a3<KernCoreName>a3>_slot_0.dcp
+    set_property SCOPED_TO_CELLS {  floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_0
+                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_1
+                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_2
+                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_3
+                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_4
+                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_5
+                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_6
+                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_7
+                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_8
+                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_9
+                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_10
+                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_11
+                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_12
+                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_13
+                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_14
+                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_15
+                                } [get_files myARTICo3.runs/<a3<KernCoreName>a3>_slot_0_synth_1/<a3<KernCoreName>a3>_slot_0.dcp]
+    add_files xcu250.xdc
+    set_property USED_IN {implementation} [get_files xcu250.xdc]
+    set_property PROCESSING_ORDER LATE [get_files xcu250.xdc]
+    link_design -mode default -reconfig_partitions {floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_0 
+                                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_1 
+                                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_2
+                                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_3
+                                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_4
+                                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_5
+                                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_6
+                                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_7
+                                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_8
+                                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_9
+                                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_10
+                                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_11
+                                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_12
+                                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_13
+                                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_14
+                                                    floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_15} -part $part -top floorplan_static_wrapper
+    write_checkpoint -force $loc/top_A1_<a3<KernCoreName>a3>_link.dcp > $loc/write_checkpoint.log
+    opt_design > $loc/top_A1_<a3<KernCoreName>a3>_opt.log
+    puts "	#HD: Completed: opt_design"
+    write_checkpoint -force $loc/top_A1_<a3<KernCoreName>a3>_opt.dcp > $loc/write_checkpoint.log
+    place_design > $loc/top_A1_<a3<KernCoreName>a3>_place.log
+    puts "	#HD: Completed: place_design"
+    write_checkpoint -force $loc/top_A1_<a3<KernCoreName>a3>_place.dcp > $loc/write_checkpoint.log
+    phys_opt_design > $loc/top_A1_<a3<KernCoreName>a3>_phys_opt.log
+    puts "	#HD: Completed: phys_opt_design"
+    write_checkpoint -force $loc/top_A1_<a3<KernCoreName>a3>_phys_opt.dcp > $loc/write_checkpoint.log
+    route_design > $loc/top_A1_<a3<KernCoreName>a3>_routed.log
+    puts "	#HD: Completed: route_design" 
+    write_checkpoint -force $loc/top_A1_<a3<KernCoreName>a3>_route.dcp > $loc/write_checkpoint.log
+    
+    # Replace slot contents by black boxes
 <a3<=generate for SLOTS=>a3>
-    read_checkpoint -cell [get_cells -hierarchical a3_slot_<a3<id>a3>] myARTICo3.runs/<a3<KernCoreName>a3>_slot_0_synth_1/<a3<KernCoreName>a3>_slot_0.dcp
+    update_design -cells [get_cells -hierarchical a3_slot_<a3<id>a3>] -black_box
 <a3<=end generate=>a3>
 
-	# Replace black boxes by static logic
-    read_checkpoint -cell [get_cells -hierarchical artico3_shuffler_0] myARTICo3.runs/system_artico3_shuffler_0_0_synth_1/system_artico3_shuffler_0_0.dcp
-
-    # Run implementation
-    opt_design
-    place_design
-    route_design
-
+    # Lock static routing
+    lock_design -level routing
     # Save checkpoint
-    write_checkpoint -force checkpoints/<a3<KernCoreName>a3>.dcp
-
-    # Verify checkpoint compatibility
-    pr_verify checkpoints/system.dcp checkpoints/<a3<KernCoreName>a3>.dcp
-
-    # Generate bitstreams
-    write_bitstream -force -bin_file bitstreams/<a3<KernCoreName>a3>.bit
-<a3<=generate for SLOTS=>a3>
-    file rename -force "bitstreams/<a3<KernCoreName>a3>_a3_slot_<a3<id>a3>_partial.bin" "bin/pbs"
-<a3<=end generate=>a3>
-<a3<end generate>a3>
+    write_checkpoint -force $loc/top_A1_<a3<KernCoreName>a3>_locked.dcp
     # Close Vivado project
     close_project
 
-    # Clean write_cfgmem report files
-    #file delete -force {*}[glob bin/*.prm]
-    #file delete -force {*}[glob bin/pbs/*.prm]
+    puts "#HD: Recombining reconfig_base_inst/<a3<KernCoreName>a3>"
+    open_checkpoint $loc/top_A1_<a3<KernCoreName>a3>_route.dcp
+    pr_recombine -cell floorplan_static_i/reconfig_base_inst_0/U0
+    write_checkpoint -force $loc/top_A1_<a3<KernCoreName>a3>_recombined.dcp
+    puts "	#HD: Completed"
+    close_project
+
+<a3<end generate>a3>
+}
+
+proc artico3_build_bitstream {} {
+
+    #Define second order Reconfigurable Partitions
+    set firstRP1 "bin"
+    set firstRP1bit "bitstreams"
+    set secondRP1 "bin/pbs"
+    
+    #Create folders for storing full, first-order and second-order bitstreams
+    file mkdir [pwd]/$secondRP1
+    file mkdir [pwd]/$firstRP1bit
+
+<a3<generate for KERNELS(KernCoreName!="a3_dummy")>a3>
+    #
+    # Kernel implementation : <a3<KernCoreName>a3>
+    #
+
+    puts "\[A3DK\] Generate bitstreams kernel <a3<KernCoreName>a3>"
+
+    puts "#HD: Generating full and partial bitstreams for shift_right functions"
+    open_checkpoint A1/top_A1_<a3<KernCoreName>a3>_route.dcp
+    write_bitstream -force -bin_file -no_partial_bitfile ./$secondRP1/top_A1_<a3<KernCoreName>a3>.bit
+    file rename "./$secondRP1/top_A1_<a3<KernCoreName>a3>.bit" "./$firstRP1bit/top_A1_<a3<KernCoreName>a3>.bit"
+
+<a3<=generate for SLOTS=>a3>
+    write_bitstream -force -bin_file -cell floorplan_static_i/reconfig_base_inst_0/U0/a3_slot_<a3<id>a3> ./$secondRP1/<a3<KernCoreName>a3>_a3_slot_<a3<id>a3>_partial.bit
+    file rename "./$secondRP1/<a3<KernCoreName>a3>_a3_slot_<a3<id>a3>_partial.bit" "./$firstRP1bit/<a3<KernCoreName>a3>_a3_slot_<a3<id>a3>_partial.bit"
+<a3<=end generate=>a3>
+
+    puts "	#HD: Completed"
+    close_project
+
+    #Generate first-order partial bitstreams for <a3<KernCoreName>a3>
+    puts "#HD: Generating partial bitstreams for reconfig_base_inst/<a3<KernCoreName>a3>"
+    open_checkpoint A1/top_A1_<a3<KernCoreName>a3>_recombined.dcp
+    write_bitstream -force -bin_file -cell floorplan_static_i/reconfig_base_inst_0/U0 ./$firstRP1/top_A1_artico3_recombined_partial.bit
+    file rename -force "./$firstRP1/top_A1_artico3_recombined_partial.bit" "./$firstRP1bit/top_A1_artico3_recombined_partial.bit"
+    puts "	#HD: Completed"
+    close_project
+
+<a3<end generate>a3>
 
 }
 
@@ -170,5 +250,10 @@ proc artico3_build_bitstream {} {
 # Main script starts here
 #
 
+# Run synthesis
+artico3_syntesize
+# Run implementation
+artico3_implementation
+# Generate bitstreams
 artico3_build_bitstream
 exit
