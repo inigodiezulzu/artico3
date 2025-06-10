@@ -15,6 +15,8 @@
 #define _ARTICO3_RCFG_H_
 
 #include <stdint.h>
+extern volatile uint32_t *artico3_rcfg;
+extern volatile uint32_t *artico3_xdma_hw;
 
 /*
  * From linux-xlnx (https://github.com/Xilinx/linux-xlnx) version
@@ -42,6 +44,14 @@
 #define A3_LEGACY_RCFG 0
 #endif
 
+/**
+ * The RW_MAX_SIZE constant represents the maximum size for read/write operations.
+ * It is defined as 0x7ffff000.
+ */
+#ifdef AU250
+#define RW_MAX_SIZE	0x7ffff000
+#endif
+
 /*
  * Main reconfiguration function
  *
@@ -54,5 +64,34 @@
  *
  */
 int fpga_load(const char *name, uint8_t is_partial);
+
+#ifdef AU250
+/*
+ * Writes data from a buffer to a file descriptor.
+ *
+ * @param fname The name of the file to write to.
+ * @param fd The file descriptor to write to.
+ * @param buffer The buffer containing the data to write.
+ * @param size The size of the data to write.
+ * @param base The base offset of the data in the buffer.
+ * @return The number of bytes written, or -1 on error.
+ */
+ssize_t write_from_buffer(char *fname, int fd, char *buffer, uint64_t size, uint64_t base);
+
+/**
+ * @brief Reads data from a file descriptor into a buffer.
+ *
+ * This function reads data from the specified file descriptor and stores it in the provided buffer.
+ *
+ * @param fname The name of the file being read.
+ * @param fd The file descriptor to read from.
+ * @param buffer The buffer to store the read data.
+ * @param size The size of the buffer.
+ * @param base The base offset for reading the file.
+ *
+ * @return The number of bytes read, or -1 if an error occurred.
+ */
+ssize_t read_to_buffer(char *fname, int fd, char *buffer, uint64_t size, uint64_t base);
+#endif /* AU250 */
 
 #endif /* _ARTICO3_RCFG_H_ */
