@@ -343,7 +343,7 @@ proc artico3_hw_setup {new_project_path new_project_name artico3_ip_dir} {
 
 # KERNEL LIBRARY (Xilinx Partial Reconfiguration Flow)
 
-<a3<generate for KERNELS(KernCoreName!="a3_dummy")>a3>
+<a3<generate for KERNELS>a3>
     #
     # Kernel : <a3<KernCoreName>a3>
     #

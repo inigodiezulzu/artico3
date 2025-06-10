@@ -130,6 +130,248 @@ err_xdevcfg:
     return ret;
 }
 
+#elif AU250
+
+/**
+ * @brief Reads data from a file descriptor into a buffer.
+ *
+ * This function reads data from the specified file descriptor and stores it in the provided buffer.
+ *
+ * @param fname The name of the file being read.
+ * @param fd The file descriptor to read from.
+ * @param buffer The buffer to store the read data.
+ * @param size The size of the buffer.
+ * @param base The base offset for reading the file.
+ *
+ * @return The number of bytes read, or -1 if an error occurred.
+ */
+ssize_t read_to_buffer(char *fname, int fd, char *buffer, uint64_t size,
+            uint64_t base)
+{
+    ssize_t rc;
+    uint64_t count = 0;
+    char *buf = buffer;
+    off_t offset = base;
+    int loop = 0;
+
+    while (count < size) {
+        ssize_t bytes = size - count;
+
+        if (bytes > RW_MAX_SIZE)
+            bytes = RW_MAX_SIZE;
+
+        if (offset) {
+            rc = lseek(fd, offset, SEEK_SET);
+            if (rc != offset) {
+                fprintf(stderr, "%s, seek off 0x%lx != 0x%lx.\n",
+                    fname, rc, offset);
+                perror("seek file");
+                return -EIO;
+            }
+        }
+
+        /* read data from file into memory buffer */
+        rc = read(fd, buf, bytes);
+        if (rc < 0) {
+            fprintf(stderr, "%s, read 0x%lx @ 0x%lx failed %ld.\n",
+                fname, bytes, offset, rc);
+            perror("read file");
+            return -EIO;
+        }
+
+        count += rc;
+        if (rc != bytes) {
+            fprintf(stderr, "%s, read underflow 0x%lx/0x%lx @ 0x%lx.\n",
+                fname, rc, bytes, offset);
+            break;
+        }
+
+        buf += bytes;
+        offset += bytes;
+        loop++;
+    }
+
+    if (count != size && loop)
+        fprintf(stderr, "%s, read underflow 0x%lx/0x%lx.\n",
+            fname, count, size);
+    return count;
+}
+
+/**
+ * Writes data from a buffer to a file descriptor.
+ *
+ * @param fname The name of the file to write to.
+ * @param fd The file descriptor to write to.
+ * @param buffer The buffer containing the data to write.
+ * @param size The size of the data to write.
+ * @param base The base offset of the data in the buffer.
+ * @return The number of bytes written, or -1 on error.
+ */
+ssize_t write_from_buffer(char *fname, int fd, char *buffer, uint64_t size,
+            uint64_t base)
+{
+    ssize_t rc;
+    uint64_t count = 0;
+    char *buf = buffer;
+    off_t offset = base;
+    int loop = 0;
+
+    while (count < size) {
+        ssize_t bytes = size - count;
+
+        if (bytes > RW_MAX_SIZE)
+            bytes = RW_MAX_SIZE;
+
+        if (offset) {
+            rc = lseek(fd, offset, SEEK_SET);
+            if (rc != offset) {
+                fprintf(stderr, "%s, seek off 0x%lx != 0x%lx.\n",
+                    fname, rc, offset);
+                perror("seek file");
+                return -EIO;
+            }
+        }
+
+        /* write data to file from memory buffer */
+        rc = write(fd, buf, bytes);
+        if (rc < 0) {
+            fprintf(stderr, "%s, write 0x%lx @ 0x%lx failed %ld.\n",
+                fname, bytes, offset, rc);
+            perror("write file");
+            return -EIO;
+        }
+
+        count += rc;
+        if (rc != bytes) {
+            fprintf(stderr, "%s, write underflow 0x%lx/0x%lx @ 0x%lx.\n",
+                fname, rc, bytes, offset);
+            break;
+        }
+        buf += bytes;
+        offset += bytes;
+
+        loop++;
+    }	
+
+    if (count != size && loop)
+        fprintf(stderr, "%s, write underflow 0x%lx/0x%lx.\n",
+            fname, count, size);
+
+    return count;
+}
+/*
+ * Main reconfiguration function (default -> hbicap)
+ *
+ * This function loads a bitstream file (either total or partial) using
+ * the hbicap reconfiguration interface.
+ *
+ * @name       : name of the bitstream file to be loaded
+ * @is_partial : flag to indicate whether the bitstream file is partial
+ *
+ * Return : 0 on success, error code otherwise
+ *
+ */
+int fpga_load(const char *name, uint8_t is_partial) {
+
+
+    int fpga_fd;
+    char *device = NULL;
+    uint64_t rcfg_addr = 0x40000000; // HBICAP base address for partial reconfiguration
+
+    // Read the bitstream file
+    FILE *file = fopen(name, "rb"); // Modo binario
+    a3_print_debug("Loading bitstream file: %s\n", name);
+    if (file == NULL) {
+        perror("Error al abrir el archivo");
+        return 1;
+    }
+
+    // Obtener tamaño del archivo
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    rewind(file); // Regresar al inicio
+
+    // Reservar buffer para el archivo
+    unsigned char *buffer = (unsigned char *)malloc(file_size);
+    if (buffer == NULL) {
+        a3_print_error("Error to allocate memory for the buffer\n");
+        fclose(file);
+        return 1;
+    }
+
+    // Leer archivo en el buffer
+    size_t bytes_read = fread(buffer, 1, file_size, file);
+    a3_print_debug("Bytes leidos: %zu\n", bytes_read);
+    if (bytes_read != file_size) {
+        a3_print_error("No se pudo leer el archivo completo");
+        free(buffer);
+        fclose(file);
+        return 1;
+    }
+
+    // Configure HBICAP for partial reconfiguration
+    
+    volatile uint32_t *HBICAP_SIZE = (uint32_t *)(artico3_rcfg + 0x0042);
+    volatile uint32_t *HBICAP_CTRL = (uint32_t *)(artico3_rcfg + 0x0043);
+    volatile uint32_t *HBICAP_STATUS = (uint32_t *)(artico3_rcfg + 0x0044);
+    if (bytes_read % 4 != 0) {
+        a3_print_error("Error: bytes_read is not a multiple of 4\n");
+        free(buffer);
+        fclose(file);
+        return 1;
+    }
+    unsigned int NWords = bytes_read/4;
+    a3_print_debug("NWords: 0x%08x\n", NWords);
+    *HBICAP_CTRL = 0xC;
+    a3_print_debug("HBICAP_CTRL: 0x%08x\n", *HBICAP_CTRL);
+    *HBICAP_SIZE = NWords;
+    
+    // Print HBICAP_STATUS
+    a3_print_debug("HBICAP_STATUS: 0x%08x\n", *HBICAP_STATUS);
+
+    //DMA transfer parameters
+    device = "/dev/xdma0_h2c_1";
+
+    fpga_fd = open(device, O_RDWR);
+    if (fpga_fd < 0) {
+        a3_print_error(stderr, "unable to open device %s, %d.\n",
+                device, fpga_fd);
+        return -1;
+    }
+
+    // Write the buffer to HBICAP in chunks of N bytes
+    // a3_print_debug("dev %s, addr 0x%lx, size 0x%lx, offset 0x%lx\n", device, (unsigned long)buffer, bytes_read, rcfg_addr);
+    // size_t chunk_size = 256;
+    // size_t offset = 0;
+    // while (offset < bytes_read) {
+    //     size_t to_write = (bytes_read - offset) < chunk_size ? (bytes_read - offset) : chunk_size;
+    //     ssize_t written = write_from_buffer(device, fpga_fd, (char *)buffer + offset, to_write, rcfg_addr);
+    //     if (written < 0) {
+    //         a3_print_error("Error writing to FPGA at offset %zu\n", offset);
+    //         break;
+    //     }
+    //     offset += written;
+    //     // printf("HBICAP_STATUS: 0x%08x\n", *HBICAP_STATUS);
+    // }
+
+    // // Write the buffer to HBICAP
+    a3_print_debug("dev %s, addr 0x%lx,size 0x%lx, offset 0x%lx\n",device, buffer , bytes_read, rcfg_addr);
+    write_from_buffer(device, fpga_fd, buffer, bytes_read, rcfg_addr);
+
+    // Print HBICAP_STATUS
+    a3_print_debug("HBICAP_STATUS: 0x%08x\n", *HBICAP_STATUS);
+
+    // Wait for HBICAP to finish reconfiguration
+    while((*HBICAP_STATUS & 0x1) == 0);
+    printf("HBICAP reconfiguration completed successfully.\n");
+
+    // Free the buffer and close the file
+    free(buffer);
+    fclose(file);
+    close(fpga_fd);
+
+    return 0;
+}
 #else
 
 /*

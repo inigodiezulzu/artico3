@@ -83,6 +83,7 @@ const char * __shm_directory(size_t * len) {
 static int artico3_fd;
 #ifdef AU250
 uint32_t *artico3_map = NULL;
+volatile uint32_t *artico3_rcfg = NULL;
 #endif
 uint32_t *artico3_hw = NULL;
 
@@ -130,145 +131,6 @@ static a3func_t artico3_functions[] = {
 
 static struct a3pool_t *kernels_pool;
 static struct a3pool_t *requests_pool;
-
-#ifdef AU250 
-/**
- * @file artico3.c
- * @brief This file contains the definition of RW_MAX_SIZE constant.
- *
- * The RW_MAX_SIZE constant represents the maximum size for read/write operations.
- * It is defined as 0x7ffff000.
- */
-#define RW_MAX_SIZE	0x7ffff000
-
-/**
- * @brief Reads data from a file descriptor into a buffer.
- *
- * This function reads data from the specified file descriptor and stores it in the provided buffer.
- *
- * @param fname The name of the file being read.
- * @param fd The file descriptor to read from.
- * @param buffer The buffer to store the read data.
- * @param size The size of the buffer.
- * @param base The base offset for reading the file.
- *
- * @return The number of bytes read, or -1 if an error occurred.
- */
-ssize_t read_to_buffer(char *fname, int fd, char *buffer, uint64_t size,
-            uint64_t base)
-{
-    ssize_t rc;
-    uint64_t count = 0;
-    char *buf = buffer;
-    off_t offset = base;
-    int loop = 0;
-
-    while (count < size) {
-        ssize_t bytes = size - count;
-
-        if (bytes > RW_MAX_SIZE)
-            bytes = RW_MAX_SIZE;
-
-        if (offset) {
-            rc = lseek(fd, offset, SEEK_SET);
-            if (rc != offset) {
-                fprintf(stderr, "%s, seek off 0x%lx != 0x%lx.\n",
-                    fname, rc, offset);
-                perror("seek file");
-                return -EIO;
-            }
-        }
-
-        /* read data from file into memory buffer */
-        rc = read(fd, buf, bytes);
-        if (rc < 0) {
-            fprintf(stderr, "%s, read 0x%lx @ 0x%lx failed %ld.\n",
-                fname, bytes, offset, rc);
-            perror("read file");
-            return -EIO;
-        }
-
-        count += rc;
-        if (rc != bytes) {
-            fprintf(stderr, "%s, read underflow 0x%lx/0x%lx @ 0x%lx.\n",
-                fname, rc, bytes, offset);
-            break;
-        }
-
-        buf += bytes;
-        offset += bytes;
-        loop++;
-    }
-
-    if (count != size && loop)
-        fprintf(stderr, "%s, read underflow 0x%lx/0x%lx.\n",
-            fname, count, size);
-    return count;
-}
-
-/**
- * Writes data from a buffer to a file descriptor.
- *
- * @param fname The name of the file to write to.
- * @param fd The file descriptor to write to.
- * @param buffer The buffer containing the data to write.
- * @param size The size of the data to write.
- * @param base The base offset of the data in the buffer.
- * @return The number of bytes written, or -1 on error.
- */
-ssize_t write_from_buffer(char *fname, int fd, char *buffer, uint64_t size,
-            uint64_t base)
-{
-    ssize_t rc;
-    uint64_t count = 0;
-    char *buf = buffer;
-    off_t offset = base;
-    int loop = 0;
-
-    while (count < size) {
-        ssize_t bytes = size - count;
-
-        if (bytes > RW_MAX_SIZE)
-            bytes = RW_MAX_SIZE;
-
-        if (offset) {
-            rc = lseek(fd, offset, SEEK_SET);
-            if (rc != offset) {
-                fprintf(stderr, "%s, seek off 0x%lx != 0x%lx.\n",
-                    fname, rc, offset);
-                perror("seek file");
-                return -EIO;
-            }
-        }
-
-        /* write data to file from memory buffer */
-        rc = write(fd, buf, bytes);
-        if (rc < 0) {
-            fprintf(stderr, "%s, write 0x%lx @ 0x%lx failed %ld.\n",
-                fname, bytes, offset, rc);
-            perror("write file");
-            return -EIO;
-        }
-
-        count += rc;
-        if (rc != bytes) {
-            fprintf(stderr, "%s, write underflow 0x%lx/0x%lx @ 0x%lx.\n",
-                fname, rc, bytes, offset);
-            break;
-        }
-        buf += bytes;
-        offset += bytes;
-
-        loop++;
-    }	
-
-    if (count != size && loop)
-        fprintf(stderr, "%s, write underflow 0x%lx/0x%lx.\n",
-            fname, count, size);
-
-    return count;
-}
-#endif
 
 /*
 * ARTICo3 signal handler for SIGTERM and SIGINT
@@ -363,6 +225,13 @@ const char *filename = "/dev/artico3";
         goto err_mmap;
     }
     a3_print_debug("[artico3-hw] artico3_map=%p\n", artico3_map);
+
+    artico3_rcfg = mmap(NULL, 0x10000, PROT_READ | PROT_WRITE, MAP_SHARED, artico3_fd, 0x1040000);
+    if (artico3_rcfg == MAP_FAILED) {
+        a3_print_error("[artico3-hw] mmap() failed\n");
+        ret = -ENOMEM;
+        goto err_mmap;
+    }
     #endif
 
     #ifdef AU250
@@ -392,7 +261,8 @@ const char *filename = "/dev/artico3";
     a3_print_info("[artico3-hw_dfx] DFX_reg_data=%d\n", DFX_reg_data[0]);
     a3_print_info("[artico3-hw_dfx] DFX_reg_intr=%d\n", DFX_reg_intr[0]);
     // Load ARTICo3 static system (global FPGA reconfiguration)
-    system("sudo xvsecctl -b 0x01 -F 0x0 -c 0x1 -p ../build.hw/bin/top_A1_artico3_recombined_partial.bin");
+    // system("sudo xvsecctl -b 0x01 -F 0x0 -c 0x1 -p ../build.hw/bin/top_A1_artico3_recombined_partial.bin");
+    fpga_load("../build.hw/bin/top_A1_artico3_recombined_partial.bin", 0);
     DFX_reg_ctrl[0]=0;
     DFX_reg_data[0]=0;
     DFX_reg_intr[0]=0;
@@ -553,6 +423,7 @@ err_malloc_slots:
     #ifdef AU250
     munmap(artico3_map, 0x3000);
     munmap(artico3_hw, 0x2000000);
+    munmap(artico3_rcfg, 0x10000);
     #else
     munmap(artico3_hw, 0x100000);
     #endif
@@ -608,9 +479,11 @@ void artico3_exit() {
     #ifdef AU250
     munmap(artico3_hw, 0x2000000);
     munmap(artico3_map, 0x3000);
+    munmap(artico3_rcfg, 0x10000);
     #else
     munmap(artico3_hw, 0x100000);
     #endif
+
     // Close ARTICo3 device file
     close(artico3_fd);
 
@@ -2579,8 +2452,10 @@ int artico3_load(void *args) {
 
                 // Load partial bitstream
                 #ifdef AU250
-                sprintf(filename, "sudo xvsecctl -b 0x01 -F 0x0 -c 0x1 -p ../build.hw/bin/pbs/a3_%s_a3_slot_%d_partial.bin", name, slot);            
-                ret = system(filename);
+                // sprintf(filename, "sudo xvsecctl -b 0x01 -F 0x0 -c 0x1 -p ../build.hw/bin/pbs/a3_%s_a3_slot_%d_partial.bin", name, slot);            
+                // ret = system(filename);
+                sprintf(filename, "../build.hw/bin/pbs/a3_%s_a3_slot_%d_partial.bin", name, slot);
+                ret = fpga_load(filename, 1);
                 #else
                 sprintf(filename, "pbs/a3_%s_a3_slot_%d_partial.bin", name, slot);
                 ret = fpga_load(filename, 1);
