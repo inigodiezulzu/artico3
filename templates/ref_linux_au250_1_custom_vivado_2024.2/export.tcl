@@ -71,7 +71,7 @@ proc artico3_hw_setup {new_project_path new_project_name artico3_ip_dir} {
     set proj_dir [get_property directory [current_project]]
 
     # Set project properties
-    #set_property "board_part_repo_paths" -value "[file normalize "$/tools/Xilinx/Vivado/2023.1/data/xhub/boards/XilinxBoardStore/boards/Xilinx"]" $proj_name
+    #set_property "board_part_repo_paths" -value "[file normalize "$/tools/Xilinx/Vivado/2024.2/data/xhub/boards/XilinxBoardStore/boards/Xilinx"]" $proj_name
     set_property "default_lib" "xil_defaultlib" $proj_name
     set_property "sim.ip.auto_export_scripts" "1" $proj_name
     set_property "simulator_language" "Mixed" $proj_name
@@ -102,10 +102,10 @@ proc artico3_hw_setup {new_project_path new_project_name artico3_ip_dir} {
 # VIVADO CONFIGURATION
     # Create 'synth_1' run (if not found)
 	if {[string equal [get_runs -quiet synth_1] ""]} {
-    create_run -name synth_1 -part xcu250-figd2104-2L-e -flow {Vivado Synthesis 2023} -strategy "Vivado Synthesis Defaults" -report_strategy {No Reports} -constrset constrs_1
+    create_run -name synth_1 -part xcu250-figd2104-2L-e -flow {Vivado Synthesis 2024} -strategy "Vivado Synthesis Defaults" -report_strategy {No Reports} -constrset constrs_1
 	} else {
 	  set_property strategy "Vivado Synthesis Defaults" [get_runs synth_1]
-	  set_property flow "Vivado Synthesis 2023" [get_runs synth_1]
+	  set_property flow "Vivado Synthesis 2024" [get_runs synth_1]
 	}
 # END
 
@@ -120,10 +120,10 @@ proc artico3_hw_setup {new_project_path new_project_name artico3_ip_dir} {
 # VIVADO CONFIGURATION
     # Create 'impl_1' run (if not found)
     if {[string equal [get_runs -quiet impl_1] ""]} {
-    create_run -name impl_1 -part xcu250-figd2104-2L-e -flow {Vivado Implementation 2023} -strategy "Vivado Implementation Defaults" -report_strategy {No Reports} -constrset constrs_1 -parent_run synth_1
+    create_run -name impl_1 -part xcu250-figd2104-2L-e -flow {Vivado Implementation 2024} -strategy "Vivado Implementation Defaults" -report_strategy {No Reports} -constrset constrs_1 -parent_run synth_1
 	} else {
 	  set_property strategy "Vivado Implementation Defaults" [get_runs impl_1]
-	  set_property flow "Vivado Implementation 2023" [get_runs impl_1]
+	  set_property flow "Vivado Implementation 2024" [get_runs impl_1]
 	}
 
 # END
@@ -224,7 +224,6 @@ proc artico3_hw_setup {new_project_path new_project_name artico3_ip_dir} {
 	CONFIG.DATA_WIDTH {32} \
 	CONFIG.PROTOCOL {AXI4} \
 	] $M00_AXI_0
-
 
 	# Create ports
 	set s_axi_aclk [ create_bd_port -dir I -type clk s_axi_aclk -freq_hz 100000000]
