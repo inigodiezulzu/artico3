@@ -320,12 +320,14 @@ int fpga_load(const char *name, uint8_t is_partial) {
         fclose(file);
         return 1;
     }
+    // Calculate the number of 32-bit words
     unsigned int NWords = bytes_read/4;
     a3_print_debug("NWords: 0x%08x\n", NWords);
+    // Set HBICAP_CTRL to 0xC to enable HBICAP and set the size
     *HBICAP_CTRL = 0xC;
     a3_print_debug("HBICAP_CTRL: 0x%08x\n", *HBICAP_CTRL);
     *HBICAP_SIZE = NWords;
-    
+
     // Print HBICAP_STATUS
     a3_print_debug("HBICAP_STATUS: 0x%08x\n", *HBICAP_STATUS);
 
@@ -339,7 +341,7 @@ int fpga_load(const char *name, uint8_t is_partial) {
         return -1;
     }
 
-    // Write the buffer to HBICAP in chunks of N bytes
+    // Write the buffer to HBICAP in chunks of 100 bytes
     // a3_print_debug("dev %s, addr 0x%lx, size 0x%lx, offset 0x%lx\n", device, (unsigned long)buffer, bytes_read, rcfg_addr);
     // size_t chunk_size = 256;
     // size_t offset = 0;
@@ -363,7 +365,7 @@ int fpga_load(const char *name, uint8_t is_partial) {
 
     // Wait for HBICAP to finish reconfiguration
     while((*HBICAP_STATUS & 0x1) == 0);
-    printf("HBICAP reconfiguration completed successfully.\n");
+    a3_print_debug("\nHBICAP reconfiguration completed successfully\n");
 
     // Free the buffer and close the file
     free(buffer);

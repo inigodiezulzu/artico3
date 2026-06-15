@@ -1,25 +1,48 @@
 /*
- * ARTICo3 daemon
+ * ARTICo3 runtime API
  *
  * Author      : Alfonso Rodriguez <alfonso.rodriguezm@upm.es>
- *               Juan Encinas <juan.encinas@upm.es>
- * Date        : May 2024
- * Description : This file contains the ARTICo3 daemon, which enables
- *               user applications to get access to adaptive
+ * Date        : August 2017
+ * Description : This file contains the ARTICo3 runtime API, which can
+ *               be used by any application to get access to adaptive
  *               hardware acceleration.
  *
  */
 
 
-#ifndef _ARTICO3D_H_
-#define _ARTICO3D_H_
+#ifndef _ARTICO3_H_
+#define _ARTICO3_H_
 
 #include <stdlib.h> // size_t
 #include <stdint.h> // uint32_t
 
-#include "artico3_data.h"
+/*
+ * ARTICo3 data type
+ *
+ * This is the main data type to be used when creating buffers between
+ * user applications and ARTICo3 hardware kernels. All variables to be
+ * sent/received need to be declared as pointers to this type.
+ *
+ *     a3data_t *myconst  = artico3_alloc(size, kname, pname, A3_P_C);
+ *     a3data_t *myinput  = artico3_alloc(size, kname, pname, A3_P_I);
+ *     a3data_t *myoutput = artico3_alloc(size, kname, pname, A3_P_O);
+ *     a3data_t *myinout  = artico3_alloc(size, kname, pname, A3_P_IO);
+ *
+ */
+typedef uint32_t a3data_t;
 
-#define A3_MAXUSERS (10)  // Max number of simultaneous ARTTCo3 users
+
+/*
+ * ARTICo3 port direction
+ *
+ * A3_P_C  - ARTICo3 Constant Input Port
+ * A3_P_I  - ARTICo3 Input Port
+ * A3_P_O  - ARTICo3 Output Port
+ * A3_P_IO - ARTICo3 Output Port
+ *
+ */
+enum a3pdir_t {A3_P_C, A3_P_I, A3_P_O, A3_P_IO};
+
 
 /*
  * SYSTEM INITIALIZATION
@@ -48,6 +71,7 @@ int artico3_init();
  */
 void artico3_exit();
 
+
 /*
  * SYSTEM MANAGEMENT
  *
@@ -59,17 +83,16 @@ void artico3_exit();
  * This function loads a hardware accelerator and/or sets its specific
  * configuration.
  *
- * @args      : buffer storing the function arguments sent by the user
- *     @name  : hardware kernel name
- *     @slot  : reconfigurable slot in which the accelerator is to be loaded
- *     @tmr   : TMR group ID (0x1-0xf)
- *     @dmr   : DMR group ID (0x1-0xf)
- *     @force : force reconfiguration even if the accelerator is already present
+ * @name  : hardware kernel name
+ * @slot  : reconfigurable slot in which the accelerator is to be loaded
+ * @tmr   : TMR group ID (0x1-0xf)
+ * @dmr   : DMR group ID (0x1-0xf)
+ * @force : force reconfiguration even if the accelerator is already present
  *
  * Return : 0 on success, error code otherwise
  *
  */
-int artico3_load(void *args);
+int artico3_load(const char *name, uint8_t slot, uint8_t tmr, uint8_t dmr, uint8_t force);
 
 
 /*
@@ -77,54 +100,12 @@ int artico3_load(void *args);
  *
  * This function removes a hardware accelerator from a reconfigurable slot.
  *
- * @args      : buffer storing the function arguments sent by the user
- *     @slot  : reconfigurable slot from which the accelerator is to be removed
+ * @slot  : reconfigurable slot from which the accelerator is to be removed
  *
  * Return : 0 on success, error code otherwise
  *
  */
-int artico3_unload(void *args);
-
-
-/*
- * ARTICo3 add new user
- *
- * This function creates the software entities required to manage a new user.
- *
- * @args             : buffer storing the function arguments sent by the user
- *     @shm_filename : user shared memory object filename
- *
- * TODO: create folders and subfolders on /dev/shm for each user and its data (kernels, inputs, etc.)
- *
- * Return : A3_MAXKERNS on success, error code otherwise
- */
-int artico3_add_user(void *args);
-
-
-/*
- * ARTICo3 remove existing user
- *
- * This function cleans the software entities created by artico3_add_user().
- *
- * @args           : buffer storing the function arguments sent by the user
- *     @user_id    : ID of the user to be removed
- *     @channel_id : ID of the channel used for handling daemon/user communication
- *
- */
-int artico3_remove_user(void *args);
-
-
-/*
- * ARTICo3 wait user hardware-acceleration request
- *
- * This function waits a command request from user.
- *
- * TODO: improve the termination mechanism
- *
- * Return : 0 on success, error code otherwise
- *
- */
-int artico3_handle_request();
+int artico3_unload(uint8_t slot);
 
 
 /*
@@ -137,16 +118,15 @@ int artico3_handle_request();
  *
  * This function creates an ARTICo3 kernel in the current application.
  *
- * @args         : buffer storing the function arguments sent by the user
- *     @name     : name of the hardware kernel to be created
- *     @membytes : local memory size (in bytes) of the associated accelerator
- *     @membanks : number of local memory banks in the associated accelerator
- *     @regs     : number of read/write registers in the associated accelerator
+ * @name     : name of the hardware kernel to be created
+ * @membytes : local memory size (in bytes) of the associated accelerator
+ * @membanks : number of local memory banks in the associated accelerator
+ * @regs     : number of read/write registers in the associated accelerator
  *
  * Return : 0 on success, error code otherwise
  *
  */
-int artico3_kernel_create(void *args);
+int artico3_kernel_create(const char *name, size_t membytes, size_t membanks, size_t regs);
 
 
 /*
@@ -154,13 +134,12 @@ int artico3_kernel_create(void *args);
  *
  * This function deletes an ARTICo3 kernel in the current application.
  *
- * @args     : buffer storing the function arguments sent by the user
- *     @name : name of the hardware kernel to be deleted
+ * @name : name of the hardware kernel to be deleted
  *
  * Return : 0 on success, error code otherwise
  *
  */
-int artico3_kernel_release(void *args);
+int artico3_kernel_release(const char *name);
 
 
 /*
@@ -168,15 +147,14 @@ int artico3_kernel_release(void *args);
  *
  * This function executes an ARTICo3 kernel in the current application.
  *
- * @args      : buffer storing the function arguments sent by the user
- *     @name  : name of the hardware kernel to execute
- *     @gsize : global work size (total amount of work to be done)
- *     @lsize : local work size (work that can be done by one accelerator)
+ * @name  : name of the hardware kernel to execute
+ * @gsize : global work size (total amount of work to be done)
+ * @lsize : local work size (work that can be done by one accelerator)
  *
  * Return : 0 on success, error code otherwisw
  *
  */
-int artico3_kernel_execute(void *args);
+int artico3_kernel_execute(const char *name, size_t gsize, size_t lsize);
 
 
 /*
@@ -184,13 +162,12 @@ int artico3_kernel_execute(void *args);
  *
  * This function waits until the kernel has finished.
  *
- * @args     : buffer storing the function arguments sent by the user
- *     @name : hardware kernel to wait for
+ * @name : hardware kernel to wait for
  *
  * Return : 0 on success, error code otherwise
  *
  */
-int artico3_kernel_wait(void *args);
+int artico3_kernel_wait(const char *name);
 
 
 /*
@@ -198,13 +175,12 @@ int artico3_kernel_wait(void *args);
  *
  * This function resets all hardware accelerators of a given kernel.
  *
- * @args     : buffer storing the function arguments sent by the user
- *     @name : hardware kernel to reset
+ * @name : hardware kernel to reset
  *
  * Return : 0 on success, error code otherwise
  *
  */
-int artico3_kernel_reset(void *args);
+int artico3_kernel_reset(const char *name);
 
 
 /*
@@ -212,11 +188,10 @@ int artico3_kernel_reset(void *args);
  *
  * This function writes configuration data to ARTICo3 kernel registers.
  *
- * @args       : buffer storing the function arguments sent by the user
- *     @name   : hardware kernel to be addressed
- *     @offset : memory offset of the register to be accessed
- *     @cfg    : array of configuration words to be written, one per
- *               equivalent accelerator
+ * @name   : hardware kernel to be addressed
+ * @offset : memory offset of the register to be accessed
+ * @cfg    : array of configuration words to be written, one per
+ *           equivalent accelerator
  *
  * Return : 0 on success, error code otherwise
  *
@@ -231,7 +206,7 @@ int artico3_kernel_reset(void *args);
  *        transactions.
  *
  */
-int artico3_kernel_wcfg(void *args);
+int artico3_kernel_wcfg(const char *name, uint16_t offset, a3data_t *cfg);
 
 
 /*
@@ -239,11 +214,10 @@ int artico3_kernel_wcfg(void *args);
  *
  * This function reads configuration data from ARTICo3 kernel registers.
  *
- * @args       : buffer storing the function arguments sent by the user
- *     @name   : hardware kernel to be addressed
- *     @offset : memory offset of the register to be accessed
- *     @cfg    : array of configuration words to be read, one per
- *               equivalent accelerator
+ * @name   : hardware kernel to be addressed
+ * @offset : memory offset of the register to be accessed
+ * @cfg    : array of configuration words to be read, one per
+ *           equivalent accelerator
  *
  * Return : 0 on success, error code otherwise
  *
@@ -258,7 +232,7 @@ int artico3_kernel_wcfg(void *args);
  *        transactions.
  *
  */
-int artico3_kernel_rcfg(void *args);
+int artico3_kernel_rcfg(const char *name, uint16_t offset, a3data_t *cfg);
 
 
 /*
@@ -310,23 +284,15 @@ int artico3_kernel_rcfg(void *args);
  * This function allocates dynamic memory to be used as a buffer between
  * the application and the local memories in the hardware kernels.
  *
- * @args      : buffer storing the function arguments sent by the user
- *     @size  : amount of memory (in bytes) to be allocated for the buffer
- *     @kname : hardware kernel name to associate this buffer with
- *     @pname : port name to associate this buffer with
- *     @dir   : data direction of the port
+ * @size  : amount of memory (in bytes) to be allocated for the buffer
+ * @kname : hardware kernel name to associate this buffer with
+ * @pname : port name to associate this buffer with
+ * @dir   : data direction of the port
  *
  * Return : pointer to allocated memory on success, NULL otherwise
  *
- * NOTE   : the dynamically allocated buffer is mapped via mmap() to a
- *          POSIX shared memory object in the "/dev/shm" tmpfs to make it
- *          accessible from different processes
- *
- * TODO   : implement optimized version using qsort();
- * TODO   : create folders and subfolders on /dev/shm for each user and its data (kernels, inputs, etc.)
- *
  */
-int artico3_alloc(void *args);
+void *artico3_alloc(size_t size, const char *kname, const char *pname, enum a3pdir_t dir);
 
 
 /*
@@ -335,29 +301,13 @@ int artico3_alloc(void *args);
  * This function frees dynamic memory allocated as a buffer between the
  * application and the hardware kernel.
  *
- * @args      : buffer storing the function arguments sent by the user
- *     @kname : hardware kernel name this buffer is associanted with
- *     @pname : port name this buffer is associated with
+ * @kname : hardware kernel name this buffer is associanted with
+ * @pname : port name this buffer is associated with
  *
  * Return : 0 on success, error code otherwise
  *
  */
-int artico3_free(void *args);
-
-
-/*
- * ARTICo3 get number of accelerators
- *
- * This function gets the current number of available hardware accelerators
- * for a given kernel ID tag.
- *
- * @args      : buffer storing the function arguments sent by the user
- *     @name  : name of the hardware kernel to get the naccs from
- *
- * Return : number of accelerators on success, error code otherwise
- *
- */
-int artico3_get_naccs(void *args);
+int artico3_free(const char *kname, const char *pname);
 
 
 /*
